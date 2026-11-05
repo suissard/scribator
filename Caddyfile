@@ -1,0 +1,30 @@
+{$DOMAIN:localhost} {
+	encode zstd gzip
+
+	# PocketBase et le serveur Node ont tous deux une API sous /api : PocketBase est servi sous /pb.
+	handle_path /pb/* {
+		reverse_proxy pocketbase:8090 {
+			flush_interval -1 # Realtime (SSE)
+			transport http {
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
+	}
+
+	handle /api/* {
+		reverse_proxy server:3001 {
+			transport http {
+				response_header_timeout 300s # routes synchrones avec réflexion IA, retries du SDK compris
+				read_timeout 300s
+				write_timeout 300s
+			}
+		}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

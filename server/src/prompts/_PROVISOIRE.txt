@@ -1,0 +1,3 @@
+Les prompts *.v1.md de ce dossier sont PROVISOIRES.
+Le §7.4 du cahier des charges prévoit de reprendre les prompts manuels de Julien.
+Pour les remplacer : créer un fichier .v2.md et changer la version dans src/lib/prompts.ts.

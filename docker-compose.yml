@@ -1,0 +1,58 @@
+services:
+  pocketbase:
+    build: ./pocketbase
+    restart: unless-stopped
+    environment:
+      PB_SUPERUSER_EMAIL: ${PB_SUPERUSER_EMAIL:?}
+      PB_SUPERUSER_PASSWORD: ${PB_SUPERUSER_PASSWORD:?}
+    volumes:
+      - pb_data:/pb/pb_data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8090/api/health || exit 1"]
+      interval: 10s
+      retries: 6
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      POCKETBASE_URL: http://pocketbase:8090
+      PB_SUPERUSER_EMAIL: ${PB_SUPERUSER_EMAIL:?}
+      PB_SUPERUSER_PASSWORD: ${PB_SUPERUSER_PASSWORD:?}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?}
+      OPENROUTER_DATA_COLLECTION: ${OPENROUTER_DATA_COLLECTION:-deny}
+      AI_MODEL_CREATIVE: ${AI_MODEL_CREATIVE:-anthropic/claude-sonnet-5.5}
+      AI_MODEL_FAST: ${AI_MODEL_FAST:-anthropic/claude-haiku-5.5}
+      AI_MODEL_REFUSAL_FALLBACK: ${AI_MODEL_REFUSAL_FALLBACK-anthropic/claude-opus-5}
+      AI_EFFORT_CREATIVE: ${AI_EFFORT_CREATIVE:-medium}
+      LOG_PROMPTS: ${LOG_PROMPTS:-false}
+      CORS_ORIGIN: https://${DOMAIN:-localhost}
+    volumes:
+      - server_logs:/app/server/logs
+
+  caddy:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - server
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+
+volumes:
+  pb_data:
+  server_logs:
+  caddy_data:

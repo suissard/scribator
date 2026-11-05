@@ -1,0 +1,26 @@
+{
+  "name": "scribator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "pb:fetch": "bash scripts/fetch-pocketbase.sh",
+    "pb": "cd pocketbase && ./pocketbase serve --http=127.0.0.1:8090 --dir=pb_data --migrationsDir=pb_migrations --hooksDir=pb_hooks",
+    "dev": "concurrently -n pb,server,client -c gray,blue,green \"npm run pb\" \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w server && npm run build -w client",
+    "test": "npm run test -w server",
+    "start": "npm run start -w server",
+    "dev:mock": "concurrently -k -n pb,mock,server,client -c gray,magenta,blue,green \"npm run pb\" \"npm run mock:openrouter -w server\" \"npm run dev:mock -w server\" \"npm run dev -w client\"",
+    "seed:dev": "node scripts/seed-dev.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.5"
+  }
+}
