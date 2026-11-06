@@ -3,9 +3,11 @@ import { z } from 'zod';
 import { callContext, guardedAi, guardedJob, type Deps } from '../deps.js';
 import { authenticate, getOwned } from '../middlewares/auth.js';
 import { badRequest, conflict, forbidden } from '../lib/errors.js';
+import { monthlySpend } from '../middlewares/budget.js';
 import { PartialStyleSchema } from '../services/bible.service.js';
-import { computeDiff, STYLE_DIFF_THRESHOLD_PERCENT } from '../services/memory.service.js';
+import { allApproved, computeDiff, STYLE_DIFF_THRESHOLD_PERCENT } from '../services/memory.service.js';
 import { countWords } from '../services/parser.service.js';
+import { estimateBookDuration } from '../services/stats.service.js';
 import { archiveVersion } from '../services/versions.service.js';
 import { STATUS_ORDER, StoryBibleSchema, type ProjectRecord, type ProjectStatus, type StyleMatrix } from '../types.js';
 import { aiRoute } from './shared.js';
@@ -13,7 +15,7 @@ import { aiRoute } from './shared.js';
 const atLeast = (s: ProjectStatus, min: ProjectStatus) => STATUS_ORDER.indexOf(s) >= STATUS_ORDER.indexOf(min);
 
 export function projectRoutes(app: FastifyInstance, deps: Deps): void {
-  const { pb, gen, jobs, env } = deps;
+  const { pb, gen, jobs, env, stats } = deps;
   const auth = authenticate(env);
   type P = { Params: { id: string } };
   const lockThen = <T>(id: string, fn: () => Promise<T>) => deps.locks.withLock(id, fn);
@@ -89,6 +91,38 @@ export function projectRoutes(app: FastifyInstance, deps: Deps): void {
       await pb.collection('projects').update(project.id, { status: 'STEP_5_WRITING' });
       return { changedPercent: diff.changedPercent };
     });
+  });
+
+  app.post<P>('/projects/:id/write-all', aiRoute(auth), async (req, reply) => {
+    const project = await getOwned<ProjectRecord>(req, 'projects', req.params.id);
+    if (project.status !== 'STEP_5_WRITING') throw conflict("Valide d'abord l'échantillon.");
+    if (allApproved(await gen.listChapters(project.id))) throw conflict('Tous les chapitres sont déjà validés.');
+    await guardedJob(deps, req, project.id);
+    const jobId = await jobs.launch({
+      userId: req.user.id, projectId: project.id, kind: 'BOOK', targetId: project.id,
+      requestId: req.id, logger: req.log,
+      run: (job) => gen.writeBook(job, project.id),
+      onSettled: (outcome) => gen.settleChapters(project.id, outcome),
+    });
+    return reply.code(202).send({ jobId });
+  });
+
+  app.get<P>('/projects/:id/estimate', { preHandler: auth }, async (req) => {
+    const project = await getOwned<ProjectRecord>(req, 'projects', req.params.id);
+    const [work, chapters, stages, spent] = await Promise.all([
+      gen.bookWork(project.id), gen.listChapters(project.id), stats.stageEstimates(project.id), monthlySpend(pb, req.user.id),
+    ]);
+    return {
+      ...estimateBookDuration({ chapters: work.todo.length, plans: work.toPlan.length + work.toRewrite.length, scenes: work.sceneCount }, stages),
+      rewrites: work.toRewrite.length,
+      ...gen.estimateBookCost(project, chapters, work.perChapter),
+      budget_left_usd: Math.max(0, req.user.monthly_budget_usd - spent),
+    };
+  });
+
+  app.get<P>('/projects/:id/report', { preHandler: auth }, async (req) => {
+    const project = await getOwned<ProjectRecord>(req, 'projects', req.params.id);
+    return stats.report(project.id);
   });
 
   app.get('/models', { preHandler: auth }, async () => ({

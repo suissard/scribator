@@ -5,6 +5,7 @@ import type { ProjectLocks } from './middlewares/projectLock.js';
 import type { GenerationService } from './services/generation.service.js';
 import type { JobsService } from './services/jobs.service.js';
 import type { CallContext, LlmService } from './services/llm.service.js';
+import type { StatsService } from './services/stats.service.js';
 
 export interface Deps {
   env: Env;
@@ -12,6 +13,7 @@ export interface Deps {
   llm: LlmService;
   gen: GenerationService;
   jobs: JobsService;
+  stats: StatsService;
   locks: ProjectLocks;
   assertBudget: (userId: string) => Promise<void>;
 }

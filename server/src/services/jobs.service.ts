@@ -5,6 +5,7 @@ import { AppError } from '../lib/errors.js';
 import type { ProjectLocks } from '../middlewares/projectLock.js';
 import type { ChapterRecord, JobRecord, SceneRecord } from '../types.js';
 import { isAbortError, type CallContext, type Logger } from './llm.service.js';
+import { ProgressTracker, type StageEstimates, type StageKey, type StepPlace } from './progress.js';
 
 export interface ActiveJob {
   controller: AbortController;
@@ -17,7 +18,9 @@ export interface JobHandle {
   signal: AbortSignal;
   active: ActiveJob;
   ctx: CallContext;
-  progress(current: number, total: number): Promise<void>;
+  stages(stages: Array<{ key: StageKey; total: number }>, estimates: StageEstimates): Promise<void>;
+  setStageTotal(key: StageKey, total: number): Promise<void>;
+  step<T>(key: StageKey, place: StepPlace, fn: () => Promise<T>): Promise<T>;
   assertNotCancelled(): void;
 }
 
@@ -30,6 +33,10 @@ export function humanMessage(e: unknown): string {
   if (e instanceof OpenAI.RateLimitError) return "Le service d'IA est saturé. Réessaie dans quelques minutes.";
   if (e instanceof OpenAI.AuthenticationError) return "Le service d'IA est mal configuré. Préviens l'administrateur.";
   if (e instanceof OpenAI.APIConnectionError) return "Le service d'IA est injoignable. Réessaie dans un instant.";
+  if (e instanceof OpenAI.NotFoundError && /data policy/i.test(e.message)) {
+    return "Ce modèle n'est pas accessible avec les réglages de confidentialité actuels : il exige souvent d'autoriser l'entraînement sur tes textes. Choisis un autre modèle, ou modifie ces réglages sur openrouter.ai/settings/privacy.";
+  }
+  if (e instanceof OpenAI.NotFoundError) return "Ce modèle n'est pas disponible pour le moment. Choisis-en un autre dans les paramètres du livre.";
   if (e instanceof OpenAI.APIError && e.status === 402) return "Le crédit du service d'IA est épuisé. Préviens l'administrateur.";
   if (e instanceof OpenAI.APIError) return "Le service d'IA a renvoyé une erreur. Réessaie dans un instant.";
   return 'La génération a échoué à cause d\'une erreur inattendue.';
@@ -76,6 +83,13 @@ export class JobsService {
     }
     const active: ActiveJob = { controller: new AbortController(), keepPartial: false, timedOut: false };
     this.activeJobs.set(record.id, active);
+    // Une progression non enregistrée ne doit pas faire perdre un texte déjà payé.
+    const tracker = new ProgressTracker((progress) =>
+      this.pb.collection('generation_jobs').update(record.id, { progress }).then(
+        () => undefined,
+        (e: unknown) => input.logger.warn({ err: e, job_id: record.id }, "échec d'écriture de la progression"),
+      ),
+    );
     const handle: JobHandle = {
       id: record.id,
       signal: active.controller.signal,
@@ -87,8 +101,9 @@ export class JobsService {
         requestId: input.requestId,
         log: input.logger,
       },
-      progress: (current, total) =>
-        this.pb.collection('generation_jobs').update(record.id, { progress: { current, total } }).then(() => undefined),
+      stages: (stages, estimates) => tracker.define(stages, estimates),
+      setStageTotal: (key, total) => tracker.setTotal(key, total),
+      step: (key, place, fn) => tracker.step(key, place, fn),
       assertNotCancelled: () => {
         if (active.controller.signal.aborted) throw new JobCancelled();
       },
@@ -104,6 +119,7 @@ export class JobsService {
   ): Promise<void> {
     const log = input.logger;
     log.info({ job_id: jobId, kind: input.kind }, 'début du job');
+    const started = Date.now();
     let status: 'DONE' | 'CANCELLED' | 'FAILED' = 'DONE';
     let error = '';
     try {
@@ -127,7 +143,7 @@ export class JobsService {
     }
     await this.pb
       .collection('generation_jobs')
-      .update(jobId, { status, error_message: error, finished_at: nowIso() })
+      .update(jobId, { status, error_message: error, finished_at: nowIso(), duration_ms: Date.now() - started })
       .catch((e: unknown) => log.error({ err: e, job_id: jobId }, 'échec de mise à jour du job'));
     this.activeJobs.delete(jobId);
     this.locks.release(input.projectId);
@@ -180,8 +196,12 @@ export class JobsService {
 
   private async sweep(): Promise<void> {
     const limit = new Date(Date.now() - this.env.JOB_TIMEOUT_MINUTES * 60_000).toISOString().replace('T', ' ');
+    // Un livre entier dure des heures : son délai porte sur le dernier maillon, pas sur le job.
     const stuck = await this.pb.collection('generation_jobs').getFullList<JobRecord>({
-      filter: this.pb.filter('status = "RUNNING" && started_at < {:d}', { d: limit }),
+      filter: this.pb.filter(
+        'status = "RUNNING" && ((kind != "BOOK" && started_at < {:d}) || (kind = "BOOK" && updated < {:d}))',
+        { d: limit },
+      ),
     });
     for (const job of stuck) {
       const active = this.activeJobs.get(job.id);

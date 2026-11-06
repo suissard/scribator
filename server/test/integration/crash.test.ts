@@ -16,6 +16,7 @@ function startServer(h: Harness, port: number): ChildProcess {
       ...process.env, NODE_ENV: 'test', PORT: String(port), POCKETBASE_URL: h.env.POCKETBASE_URL,
       PB_SUPERUSER_EMAIL: h.env.PB_SUPERUSER_EMAIL, PB_SUPERUSER_PASSWORD: h.env.PB_SUPERUSER_PASSWORD,
       OPENROUTER_API_KEY: 'mock', OPENROUTER_BASE_URL: h.mock.url, DRAFT_TICK_MS: '20',
+      AI_MODEL_CREATIVE: h.env.AI_MODEL_CREATIVE, AI_MODEL_FAST: h.env.AI_MODEL_FAST,
     },
   });
 }

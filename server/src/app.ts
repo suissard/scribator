@@ -21,6 +21,7 @@ import { GenerationService } from './services/generation.service.js';
 import { humanMessage, JobsService } from './services/jobs.service.js';
 import { LlmService } from './services/llm.service.js';
 import { ModelCatalog } from './services/models.service.js';
+import { StatsService } from './services/stats.service.js';
 
 function loggerOptions(env: Env): FastifyServerOptions['logger'] {
   const base = {
@@ -54,12 +55,13 @@ export async function buildApp(env: Env): Promise<{ app: FastifyInstance; deps: 
   const locks = new ProjectLocks(pb);
   const assertBudget = budgetGuard(pb, app.log);
   const catalog = new ModelCatalog();
-  await catalog.load(env.OPENROUTER_BASE_URL, app.log);
+  await catalog.load(env.OPENROUTER_BASE_URL, app.log, env.OPENROUTER_CATALOG_URL);
   catalog.assertUsable([env.AI_MODEL_CREATIVE, env.AI_MODEL_FAST, env.AI_MODEL_REFUSAL_FALLBACK].filter(Boolean));
   const llm = new LlmService(env, catalog, (entry) => pb.collection('ai_calls').create(entry), assertBudget);
-  const gen = new GenerationService(pb, env, llm);
+  const stats = new StatsService(pb, app.log);
+  const gen = new GenerationService(pb, env, llm, stats);
   const jobs = new JobsService(pb, env, locks, app.log);
-  const deps: Deps = { env, pb, llm, gen, jobs, locks, assertBudget };
+  const deps: Deps = { env, pb, llm, gen, jobs, stats, locks, assertBudget };
 
   await app.register(cors, {
     origin: env.CORS_ORIGIN.split(',').map((o) => o.trim()),

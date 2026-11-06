@@ -1,6 +1,7 @@
 import { Download } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '@/api/server';
+import { GenerationReport } from '@/components/review/GenerationReport';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ErrorNote } from '@/components/ui/ErrorNote';
@@ -17,11 +18,12 @@ const FORMATS = [
 
 export function Step6Export({ project }: { project: Project }) {
   const chapters = useProjectStore((s) => s.chapters);
+  const jobId = useProjectStore((s) => s.activeJob?.id);
   const [notice, setNotice] = useState(false);
   const { busy, error, run } = useAction();
   const done = chapters.filter((c) => c.status === 'APPROVED').length;
   return (
-    <div className="mx-auto max-w-xl space-y-4 p-4 sm:p-6">
+    <div className="mx-auto max-w-3xl space-y-4 p-4 sm:p-6">
       <Card className="space-y-4">
         <h2 className="font-semibold">Exporter « {project.title} »</h2>
         <p className="text-sm text-muted">{done} chapitres validés sur {chapters.length}.</p>
@@ -48,6 +50,7 @@ export function Step6Export({ project }: { project: Project }) {
         </div>
         <ErrorNote error={error} />
       </Card>
+      <GenerationReport projectId={project.id} refreshKey={`${project.status}:${jobId ?? ''}`} />
     </div>
   );
 }

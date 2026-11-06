@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Base de développement locale uniquement : crée le superuser et un compte de démonstration.
-// Ces identifiants n'existent que dans pocketbase/pb_data et ne servent jamais en production.
+// Base du simulateur uniquement, à lancer pendant npm run dev:mock : crée le compte de démonstration.
+// Ces identifiants n'existent que dans pocketbase/pb_data_mock et ne servent jamais en production.
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const superuser = ['dev-superuser@scribator.test', 'dev-superuser-password'];
 const demo = { email: 'demo@scribator.test', password: 'demo-password-1234' };
 
-execFileSync('./pocketbase', ['superuser', 'upsert', ...superuser, '--dir=pb_data', '--migrationsDir=pb_migrations'], {
+execFileSync('./pocketbase', ['superuser', 'upsert', ...superuser, '--dir=pb_data_mock', '--migrationsDir=pb_migrations'], {
   cwd: path.join(root, 'pocketbase'),
   stdio: 'inherit',
 });

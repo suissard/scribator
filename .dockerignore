@@ -3,6 +3,7 @@
 **/logs
 **/.env
 pocketbase/pb_data
+pocketbase/pb_data_mock
 pocketbase/pocketbase
 .git
 out

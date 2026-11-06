@@ -44,7 +44,7 @@ const model = (id: string, over: object = {}) => ({
   id,
   name: id.split('/')[1],
   context_length: 1_000_000,
-  pricing: { prompt: '0.000002', completion: '0.00001' },
+  pricing: { prompt: '0.000002', completion: '0.00001', input_cache_read: '0.0000002' },
   supported_parameters: ['max_tokens', 'reasoning', 'response_format', 'structured_outputs'],
   top_provider: { max_completion_tokens: 128_000 },
   reasoning: { supported_efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
@@ -52,13 +52,15 @@ const model = (id: string, over: object = {}) => ({
 });
 
 const CATALOG = [
-  model('anthropic/claude-sonnet-5.5'),
-  model('anthropic/claude-haiku-5.5'),
-  model('anthropic/claude-opus-5'),
+  model('simu/redaction'),
+  model('simu/rapide'),
+  model('simu/repli'),
   model('gratuit/libre:free', { pricing: { prompt: '0', completion: '0' } }),
-  model('anthropic/claude-sonnet-5.5:batch'),
+  model('nvidia/nemotron-3.5-super-vl:free', { pricing: { prompt: '0', completion: '0' } }), // celui de .env.mock, hors ligne
+  model('simu/redaction:batch'),
   model('petit/sans-reflexion', { context_length: 32_000, supported_parameters: ['max_tokens', 'structured_outputs'], top_provider: { max_completion_tokens: 8000 }, reasoning: null }),
   model('vieux/sans-json', { supported_parameters: ['max_tokens'] }),
+  model('openrouter/auto', { pricing: { prompt: '-1', completion: '-1' } }),
 ];
 
 function structuredAnswer(schema: any, prompt: string): unknown {
@@ -155,7 +157,7 @@ export function startMock(options: MockOptions = {}): Promise<MockServer> {
       completion_tokens: outputTokens,
       total_tokens: prompt + outputTokens,
       prompt_tokens_details: { cached_tokens: read, cache_write_tokens: written },
-      cost: (prompt * 2 + outputTokens * 10) / 1_000_000,
+      cost: ((prompt - read - written) * 2 + read * 0.2 + written * 2.5 + outputTokens * 10) / 1_000_000,
     };
   };
 
@@ -176,9 +178,15 @@ export function startMock(options: MockOptions = {}): Promise<MockServer> {
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       requests.push(body);
       const prompt = promptText(body);
-      const refused = prompt.includes('[[REFUSE]]') || (prompt.includes('[[REFUSE_ONCE]]') && !body.model.includes('opus'));
+      const refused = prompt.includes('[[REFUSE]]') || (prompt.includes('[[REFUSE_ONCE]]') && !body.model.includes('repli'));
       const id = `gen-mock-${requests.length}`;
       const base = { id, created: 0, model: body.model, provider: 'Mock' };
+
+      if (body.model.endsWith(':free') && body.provider?.data_collection === 'deny') {
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: { code: 404, message: 'No endpoints found matching your data policy (Free model training). Configure: https://openrouter.ai/settings/privacy' } }));
+        return;
+      }
 
       if (prompt.includes('[[MODERATE]]')) {
         res.writeHead(403, { 'content-type': 'application/json' });

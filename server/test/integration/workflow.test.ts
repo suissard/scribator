@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import PocketBase from 'pocketbase';
+import { startMock } from '../../scripts/mock-openrouter.js';
+import { ModelCatalog } from '../../src/services/models.service.js';
 import { countWords } from '../../src/services/parser.service.js';
 import {
   approveChapter, createUser, job, scenesOf, sleep, startHarness, until, writeChapter, writingProject, BIBLE, STYLE,
@@ -65,6 +67,10 @@ describe('tranche 1 : fondations', () => {
     expect((await h.app.inject({ url: '/api/health' })).json()).toEqual({ status: 'ok', pocketbase: 'ok' });
     const r = await h.app.inject({ method: 'POST', url: '/api/client-errors', payload: { message: 'boum' } });
     expect(r.statusCode).toBe(200);
+    const warn = await h.app.inject({ method: 'POST', url: '/api/client-errors', payload: { level: 'warn', message: 'x', context: { status: 404 } } });
+    expect(warn.statusCode).toBe(200);
+    const bad = await h.app.inject({ method: 'POST', url: '/api/client-errors', payload: { level: 'info', message: 'x' } });
+    expect(bad.statusCode).toBe(400);
   });
 
   it('limite à 30 requêtes par minute sur les routes IA, par utilisateur', async () => {
@@ -131,7 +137,7 @@ describe('tranches 2 et 3 : du fichier à l’échantillon', () => {
     expect(after.reference_meta).toBeNull();
     const call = await h.su.collection('ai_calls').getFirstListItem(`project = "${p.id}" && purpose = "style_extract"`);
     expect(call.prompt_version).toBe('style_invent.v1');
-    expect(call.model).toBe('anthropic/claude-sonnet-5.5');
+    expect(call.model).toBe('simu/redaction');
   });
 
   it('refuse une analyse sans idées ni ouvrage', async () => {
@@ -318,7 +324,7 @@ describe('tranche 4 : studio', () => {
   });
 
   it('envoie à OpenRouter les paramètres attendus', () => {
-    const scene = h.mock.requests.findLast((r) => r.stream && r.model === 'anthropic/claude-sonnet-5.5')!;
+    const scene = h.mock.requests.findLast((r) => r.stream && r.model === 'simu/redaction')!;
     expect(scene.max_tokens).toBe(16000);
     expect(scene.reasoning).toEqual({ effort: 'medium', exclude: true });
     expect(scene.session_id).toBeTruthy();
@@ -442,14 +448,14 @@ describe('tranche 4 : studio', () => {
   });
 
   it('retente un refus sur le modèle de repli, en repartant de zéro', async () => {
-    const withFallback = await startHarness({ AI_MODEL_REFUSAL_FALLBACK: 'anthropic/claude-opus-5' });
+    const withFallback = await startHarness({ AI_MODEL_REFUSAL_FALLBACK: 'simu/repli' });
     try {
       const user = await createUser(withFallback);
       const { chapters, project } = await writingProject(withFallback, user, 1, 1100, { reformulated_concept: '[[REFUSE_ONCE]]' });
       expect((await writeChapter(withFallback, user, chapters[0]!.id)).status).toBe('DONE');
       expect((await scenesOf(withFallback, chapters[0]!.id))[0]!.content).toContain('phare');
       const calls = await withFallback.su.collection('ai_calls').getFullList({ filter: `project = "${project.id}" && purpose = "scene_write"`, sort: 'created' });
-      expect(calls.map((c) => [c.model, c.status])).toEqual([['anthropic/claude-sonnet-5.5', 'REFUSED'], ['anthropic/claude-opus-5', 'OK']]);
+      expect(calls.map((c) => [c.model, c.status])).toEqual([['simu/redaction', 'REFUSED'], ['simu/repli', 'OK']]);
     } finally {
       await withFallback.stop();
     }
@@ -588,13 +594,35 @@ describe('tranche 4 : studio', () => {
 });
 
 describe('modèle de rédaction par livre', () => {
+  it('garde l’ordre du catalogue et écarte les routeurs sans prix', async () => {
+    const { body } = await u.api('GET', '/models');
+    const ids = body.models.map((m: { id: string }) => m.id);
+    expect(ids).not.toContain('openrouter/auto');
+    expect(ids.indexOf('simu/redaction')).toBeLessThan(ids.indexOf('gratuit/libre:free'));
+    expect(ids.indexOf('gratuit/libre:free')).toBeLessThan(ids.indexOf('petit/sans-reflexion'));
+    expect(ids).not.toEqual([...ids].sort());
+  });
+
+  it('lit le catalogue indiqué, et se rabat sur l’API s’il est injoignable', async () => {
+    const log = { warn() {} };
+    const fallback = new ModelCatalog();
+    await fallback.load(h.mock.url, log, 'http://127.0.0.1:1/models');
+    expect(fallback.selectable().length).toBeGreaterThan(0);
+
+    const other = await startMock();
+    const fromUrl = new ModelCatalog();
+    await fromUrl.load('http://127.0.0.1:1', log, `${other.url}/models`);
+    await other.close();
+    expect(fromUrl.selectable().length).toBeGreaterThan(0);
+  });
+
   it('liste les modèles utilisables, sans variantes batch', async () => {
     const r = await u.api('GET', '/models');
-    expect(r.body.default_model).toBe('anthropic/claude-sonnet-5.5');
+    expect(r.body.default_model).toBe('simu/redaction');
     const ids = r.body.models.map((m: any) => m.id);
     expect(ids).toContain('gratuit/libre:free');
     expect(ids).not.toContain('vieux/sans-json');
-    expect(ids).not.toContain('anthropic/claude-sonnet-5.5:batch');
+    expect(ids).not.toContain('simu/redaction:batch');
     expect(r.body.models.find((m: any) => m.id === 'gratuit/libre:free').free).toBe(true);
   });
 
@@ -614,17 +642,27 @@ describe('modèle de rédaction par livre', () => {
     await writeChapter(h, u, chapters[0]!.id);
     const calls = await h.su.collection('ai_calls').getFullList({ filter: `project = "${project.id}"` });
     expect(calls.find((c) => c.purpose === 'scene_write')!.model).toBe('petit/sans-reflexion');
-    expect(calls.find((c) => c.purpose === 'scene_plan')!.model).toBe('anthropic/claude-haiku-5.5');
+    expect(calls.find((c) => c.purpose === 'scene_plan')!.model).toBe('simu/rapide');
     const request = h.mock.requests.findLast((r) => r.stream)!;
     expect(request.max_tokens).toBe(8000);
     expect(request).not.toHaveProperty('reasoning');
+  });
+
+  it('explique le blocage d’un modèle gratuit par la politique de données', async () => {
+    const { chapters } = await writingProject(h, u, 1, 1100, { model_creative: 'gratuit/libre:free' });
+    await h.su.collection('scenes').create({ chapter: chapters[0]!.id, scene_number: 1, beat: 'b', target_words: 1100, status: 'PENDING' });
+    const j = await writeChapter(h, u, chapters[0]!.id);
+    expect(j.status).toBe('FAILED');
+    expect(j.error_message).toMatch(/réglages de confidentialité/);
+    const [call] = await h.su.collection('ai_calls').getFullList({ filter: 'model = "gratuit/libre:free"', sort: '-created' });
+    expect(call!.error_message).toContain('data policy'); // le détail brut reste dans le journal
   });
 
   it('revient au modèle du serveur quand le choix est vidé', async () => {
     const { project, chapters } = await writingProject(h, u, 1, 1100, { model_creative: 'petit/sans-reflexion' });
     expect((await u.api('PATCH', `/projects/${project.id}/model`, { model: '' })).status).toBe(200);
     await writeChapter(h, u, chapters[0]!.id);
-    expect(h.mock.requests.findLast((r) => r.stream)!.model).toBe('anthropic/claude-sonnet-5.5');
+    expect(h.mock.requests.findLast((r) => r.stream)!.model).toBe('simu/redaction');
   });
 
   it('explique qu’un modèle retiré du catalogue n’est plus disponible', async () => {
@@ -665,6 +703,294 @@ describe('garde-fou', () => {
     expect(j.error_message).toMatch(/délai/i);
     expect((await scenesOf(h, chapters[0]!.id)).every((s) => s.status === 'PENDING')).toBe(true);
     expect(h.deps.locks.has(project.id)).toBe(false);
+  });
+});
+
+describe('réécriture d’un chapitre', () => {
+  let w: TestUser; // son propre compte : ces tests pèsent sur la limite de requêtes IA par utilisateur
+  beforeAll(async () => {
+    w = await createUser(h);
+  });
+  const rewrite = (id: string) => w.api('POST', `/chapters/${id}/rewrite`);
+  const written = async (brief?: string) => {
+    const { project, chapters } = await writingProject(h, w, 2, 2200);
+    const chapter = chapters[0]!;
+    await writeChapter(h, w, chapter.id);
+    const scenes = await scenesOf(h, chapter.id);
+    await h.su.collection('scenes').update(scenes[0]!.id, { content: 'Texte de l’auteur', beat: 'Ancien plan' });
+    if (brief) await h.su.collection('chapters').update(chapter.id, { brief_summary: brief });
+    return { project, chapter, chapters, scenes };
+  };
+  const versionsOf = (id: string) => h.su.collection('versions').getFullList({ filter: `target_id = "${id}"` });
+
+  it('refait le plan et le texte, et garde l’ancien dans l’historique', async () => {
+    const { chapter, scenes } = await written();
+    const r = await rewrite(chapter.id);
+    expect(r.status).toBe(202);
+    expect((await job(h, r.body.jobId)).status).toBe('DONE');
+    const after = await scenesOf(h, chapter.id);
+    expect(after.map((s) => s.id)).toEqual(scenes.map((s) => s.id));
+    expect(after.every((s) => s.status === 'REVIEW')).toBe(true);
+    expect(after[0]!.content).not.toBe('Texte de l’auteur');
+    expect(after[0]!.beat).not.toBe('Ancien plan');
+    expect((await versionsOf(scenes[0]!.id)).map((v) => v.content)).toContain('Texte de l’auteur');
+    expect((await h.su.collection('chapters').getOne(chapter.id)).status).toBe('REVIEW');
+    await approveChapter(w, chapter.id);
+  });
+
+  it('archive les scènes en trop', async () => {
+    const { chapter } = await written();
+    const extra = await h.su.collection('scenes').create({ chapter: chapter.id, scene_number: 9, beat: 'x', target_words: 100, content: 'Scène en trop', status: 'REVIEW' });
+    const r = await rewrite(chapter.id);
+    expect((await job(h, r.body.jobId)).status).toBe('DONE');
+    expect((await scenesOf(h, chapter.id)).map((s) => s.scene_number)).toEqual([1, 2]);
+    expect((await versionsOf(extra.id)).map((v) => v.content)).toContain('Scène en trop');
+  });
+
+  it('ne touche à rien si le nouveau plan échoue', async () => {
+    const { chapter } = await written('[[REFUSE]]');
+    const r = await rewrite(chapter.id);
+    expect((await job(h, r.body.jobId)).status).toBe('FAILED');
+    const [first] = await scenesOf(h, chapter.id);
+    expect(first).toMatchObject({ content: 'Texte de l’auteur', beat: 'Ancien plan', status: 'REVIEW' });
+    expect((await h.su.collection('chapters').getOne(chapter.id)).status).toBe('REVIEW');
+  });
+
+  it('exige un chapitre en relecture, après un chapitre validé', async () => {
+    const { chapter, chapters } = await written();
+    expect((await rewrite(chapters[1]!.id)).status).toBe(409);
+    await approveChapter(w, chapter.id);
+    expect((await rewrite(chapter.id)).status).toBe(409);
+    expect((await rewrite(chapters[1]!.id)).status).toBe(409);
+    expect(h.deps.locks.has(chapter.project)).toBe(false);
+  });
+});
+
+describe('écriture automatique du livre', () => {
+  const start = async (id: string, who = u) => {
+    const r = await who.api('POST', `/projects/${id}/write-all`);
+    expect(r.status).toBe(202);
+    return r.body.jobId as string;
+  };
+  const chaptersOf = (id: string) => h.su.collection('chapters').getFullList({ filter: `project = "${id}"`, sort: 'chapter_number' });
+
+  it('écrit, valide et clôt le livre, en appliquant la Bible au fil de l’eau', async () => {
+    const { project } = await writingProject(h, u, 3, 2200);
+    const j = await job(h, await start(project.id));
+    expect(j.status).toBe('DONE');
+    expect(j.kind).toBe('BOOK');
+    expect(j.duration_ms).toBeGreaterThan(0);
+    expect((await chaptersOf(project.id)).every((c) => c.status === 'APPROVED' && c.post_writing_summary)).toBe(true);
+    const after = await h.su.collection('projects').getOne(project.id);
+    expect(after.status).toBe('COMPLETED');
+    expect(after.story_bible.characters.map((c: { name: string }) => c.name)).toContain('Le visiteur');
+    const pending = await h.su.collection('pending_changes').getFullList({ filter: `project = "${project.id}"` });
+    expect(pending).toHaveLength(0);
+    expect(h.deps.locks.has(project.id)).toBe(false);
+  });
+
+  it('remplit chaque étape et connaît le nombre exact de scènes', async () => {
+    const { project } = await writingProject(h, u, 2, 2200);
+    const j = await job(h, await start(project.id));
+    const stages = Object.fromEntries(j.progress.stages.map((s: { key: string }) => [s.key, s]));
+    expect(stages.plan).toMatchObject({ done: 2, total: 2, basis: 'run' });
+    expect(stages.write).toMatchObject({ done: 4, total: 4, basis: 'run' });
+    expect(stages.memory).toMatchObject({ done: 2, total: 2, basis: 'run' });
+    expect(stages.write.avg_ms).toBeGreaterThan(0);
+  });
+
+  it('annonce une estimation égale au travail réellement fait', async () => {
+    const { project } = await writingProject(h, u, 2, 2200);
+    const r = await u.api('GET', `/projects/${project.id}/estimate`);
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ chapters: 2, plans: 2, scenes: 4 });
+    expect(r.body.duration_ms).toBeGreaterThan(0);
+    expect(r.body.budget_left_usd).toBeGreaterThan(0);
+  });
+
+  it('encadre le coût réel par sa fourchette, et les tokens à moins d’un facteur 2', async () => {
+    const { project } = await writingProject(h, u, 5, 3300);
+    const { body: estimate } = await u.api('GET', `/projects/${project.id}/estimate`);
+    await job(h, await start(project.id));
+    const { body: report } = await u.api('GET', `/projects/${project.id}/report`);
+    const { totals } = report;
+    expect(totals.cost_usd).toBeGreaterThan(estimate.cost_low_usd);
+    expect(totals.cost_usd).toBeLessThan(estimate.cost_high_usd);
+    const input = totals.input_tokens + totals.cache_read_tokens + totals.cache_write_tokens;
+    expect(input / estimate.input_tokens).toBeGreaterThan(0.5);
+    expect(input / estimate.input_tokens).toBeLessThan(2);
+    expect(totals.output_tokens / estimate.output_tokens).toBeGreaterThan(0.5);
+    expect(totals.output_tokens / estimate.output_tokens).toBeLessThan(2);
+  });
+
+  it('estime selon le modèle du livre', async () => {
+    const { project } = await writingProject(h, u, 2, 2200);
+    const paid = (await u.api('GET', `/projects/${project.id}/estimate`)).body;
+    await h.su.collection('projects').update(project.id, { model_creative: 'gratuit/libre:free' });
+    const free = (await u.api('GET', `/projects/${project.id}/estimate`)).body;
+    expect(free.model).toBe('gratuit/libre:free');
+    expect(free.input_tokens).toBe(paid.input_tokens);
+    expect(free.cost_high_usd).toBeLessThan(paid.cost_low_usd);
+  });
+
+  it('rend compte des tokens, du cache et du coût, y compris hors job', async () => {
+    const { project } = await writingProject(h, u, 2, 2200);
+    await job(h, await start(project.id));
+    const { status, body } = await u.api('GET', `/projects/${project.id}/report`);
+    expect(status).toBe(200);
+    expect(body.by_purpose.map((p: { purpose: string }) => p.purpose).sort()).toEqual(['chapter_summary', 'scene_plan', 'scene_write']);
+    expect(body.totals).toMatchObject({ calls: 2 + 4 + 2, failed_calls: 0 });
+    expect(body.totals.output_tokens).toBeGreaterThan(0);
+    expect(body.totals.cache_read_tokens).toBeGreaterThan(0);
+    expect(body.totals.cost_usd).toBeGreaterThan(0);
+    expect(body.words).toBeGreaterThan(3000);
+    expect(body.cost_per_1000_words).toBeGreaterThan(0);
+  });
+
+  it('un autre utilisateur ne voit ni l’estimation ni le compte rendu', async () => {
+    const { project } = await writingProject(h, u, 1, 1100);
+    const other = await createUser(h);
+    expect((await other.api('GET', `/projects/${project.id}/report`)).status).toBe(404);
+    expect((await other.api('GET', `/projects/${project.id}/estimate`)).status).toBe(404);
+    expect((await other.api('POST', `/projects/${project.id}/write-all`)).status).toBe(404);
+  });
+
+  it('refuse avant la validation de l’échantillon, et sur un livre fini', async () => {
+    const early = await writingProject(h, u, 1, 1100, { status: 'STEP_4_SAMPLE_REVIEW' });
+    expect((await u.api('POST', `/projects/${early.project.id}/write-all`)).status).toBe(409);
+    const { project } = await writingProject(h, u, 1, 1100);
+    await job(h, await start(project.id));
+    await h.su.collection('projects').update(project.id, { status: 'STEP_5_WRITING' });
+    expect((await u.api('POST', `/projects/${project.id}/write-all`)).status).toBe(409);
+  });
+
+  it('s’arrête sur demande, puis reprend là où il en était', async () => {
+    const { project, chapters } = await writingProject(h, u, 2, 2200, { reformulated_concept: '[[SLOW]]' });
+    const id = await start(project.id);
+    await until(async () => (await scenesOf(h, chapters[0]!.id)).some((s) => s.status === 'GENERATING' && s.draft));
+    expect((await u.api('POST', `/jobs/${id}/cancel`, { keepPartial: false })).status).toBe(200);
+    expect((await job(h, id)).status).toBe('CANCELLED');
+    expect((await chaptersOf(project.id)).some((c) => c.status === 'GENERATING')).toBe(false);
+    expect((await scenesOf(h, chapters[0]!.id)).every((s) => s.status === 'PENDING')).toBe(true);
+
+    await h.su.collection('projects').update(project.id, { reformulated_concept: 'Un concept.' });
+    const planned = h.mock.requests.length;
+    const resumed = await job(h, await start(project.id));
+    expect(resumed.status).toBe('DONE');
+    expect(resumed.progress.stages.find((s: { key: string }) => s.key === 'plan').total).toBe(0);
+    expect(h.mock.requests.length).toBe(planned + 4 + 2); // 4 scènes et 2 résumés, aucun nouveau plan
+    expect((await h.su.collection('projects').getOne(project.id)).status).toBe('COMPLETED');
+  });
+
+  it('s’arrête sur une erreur sans valider le chapitre, avec un message lisible', async () => {
+    const { project, chapters } = await writingProject(h, u, 2, 1100);
+    await u.api('POST', `/chapters/${chapters[1]!.id}/plan-scenes`);
+    const [scene] = await scenesOf(h, chapters[1]!.id);
+    await h.su.collection('scenes').update(scene!.id, { beat: '[[REFUSE]]' });
+    const j = await job(h, await start(project.id));
+    expect(j.status).toBe('FAILED');
+    expect(j.error_message).toBeTruthy();
+    const [first, second] = await chaptersOf(project.id);
+    expect(first!.status).toBe('APPROVED');
+    expect(second!.status).toBe('ERROR');
+    expect(h.deps.locks.has(project.id)).toBe(false);
+  });
+
+  it('refait les chapitres écrits mais non validés, sans toucher aux chapitres validés', async () => {
+    const { project, chapters } = await writingProject(h, u, 3, 1100);
+    await job(h, await start(project.id));
+    await u.api('POST', `/chapters/${chapters[1]!.id}/reopen`);
+    expect((await chaptersOf(project.id)).map((c) => c.status)).toEqual(['APPROVED', 'REVIEW', 'STALE']);
+    const scenes = await Promise.all(chapters.map(async (c) => (await scenesOf(h, c.id))[0]!));
+    for (const s of scenes) await h.su.collection('scenes').update(s.id, { content: 'Ancien texte', beat: 'Ancien plan' });
+
+    const { body: estimate } = await u.api('GET', `/projects/${project.id}/estimate`);
+    expect(estimate).toMatchObject({ chapters: 2, plans: 2, scenes: 2, rewrites: 2 });
+    const before = h.mock.requests.length;
+    const j = await job(h, await start(project.id));
+    expect(j.status).toBe('DONE');
+    expect(h.mock.requests.length).toBe(before + 6); // par chapitre : un plan, une scène, un résumé
+    const stages = Object.fromEntries(j.progress.stages.map((s: { key: string }) => [s.key, s]));
+    expect(stages.plan).toMatchObject({ done: 2, total: 2 });
+    expect(stages.write).toMatchObject({ done: 2, total: 2 });
+
+    const [approved, reviewed, stale] = await Promise.all(scenes.map((s) => h.su.collection('scenes').getOne(s.id)));
+    expect(approved).toMatchObject({ content: 'Ancien texte', beat: 'Ancien plan' });
+    for (const s of [reviewed!, stale!]) {
+      expect(s.content).not.toBe('Ancien texte');
+      expect(s.beat).not.toBe('Ancien plan');
+      expect(s.status).toBe('APPROVED');
+      const versions = await h.su.collection('versions').getFullList({ filter: `target_id = "${s.id}"` });
+      expect(versions.map((v) => v.content)).toContain('Ancien texte');
+    }
+    const after = await chaptersOf(project.id);
+    expect(after.every((c) => c.status === 'APPROVED' && !c.stale_reason)).toBe(true);
+    expect((await h.su.collection('projects').getOne(project.id)).status).toBe('COMPLETED');
+  });
+
+  it('garde les scènes déjà écrites d’un chapitre interrompu', async () => {
+    const { project, chapters } = await writingProject(h, u, 1, 2200);
+    await u.api('POST', `/chapters/${chapters[0]!.id}/plan-scenes`);
+    const [first, second] = await scenesOf(h, chapters[0]!.id);
+    await h.su.collection('scenes').update(first!.id, { content: 'Scène déjà écrite', status: 'REVIEW' });
+    await h.su.collection('chapters').update(chapters[0]!.id, { status: 'REVIEW' });
+    expect((await job(h, await start(project.id))).status).toBe('DONE');
+    expect((await h.su.collection('scenes').getOne(first!.id)).content).toBe('Scène déjà écrite');
+    expect((await h.su.collection('scenes').getOne(second!.id)).content).toBeTruthy();
+  });
+
+  it('laisse intact un chapitre dont le nouveau plan échoue', async () => {
+    const { project, chapters } = await writingProject(h, u, 2, 1100);
+    await job(h, await start(project.id));
+    await u.api('POST', `/chapters/${chapters[1]!.id}/reopen`);
+    await h.su.collection('chapters').update(chapters[1]!.id, { status: 'STALE', brief_summary: '[[REFUSE]]' });
+    const text = (await scenesOf(h, chapters[1]!.id))[0]!.content;
+    const j = await job(h, await start(project.id));
+    expect(j.status).toBe('FAILED');
+    expect((await chaptersOf(project.id)).map((c) => c.status)).toEqual(['APPROVED', 'STALE']);
+    expect((await scenesOf(h, chapters[1]!.id))[0]).toMatchObject({ content: text, status: 'REVIEW' });
+  });
+
+  it('laisse en proposition un patch de Bible inapplicable', async () => {
+    const { project } = await writingProject(h, u, 1, 1100);
+    await h.su.collection('projects').update(project.id, { story_bible: { ...BIBLE, characters: 'cassée' } }).catch(() => {});
+    const ctx = { userId: u.id, projectId: project.id, requestId: 't', log: { info() {}, warn() {}, error() {} } };
+    const broken = { operations: [{ op: 'remove', section: 'characters', id: 'char_inconnu', reason: 'x' }] };
+    await (h.deps.gen as any).handleBiblePatch(ctx, await h.deps.gen.getProject(project.id), broken, '', { applyBible: true });
+    const pending = await h.su.collection('pending_changes').getFullList({ filter: `project = "${project.id}"` });
+    expect(pending).toHaveLength(1);
+  });
+
+  it('le budget épuisé en route arrête le livre avec un message clair', async () => {
+    const poor = await createUser(h, { monthly_budget_usd: 0.000001 });
+    const { project } = await writingProject(h, poor, 2, 1100);
+    await h.su.collection('ai_calls').create({ user: poor.id, cost_usd: 0, purpose: 'test', status: 'OK' });
+    const r = await poor.api('POST', `/projects/${project.id}/write-all`);
+    expect(r.status).toBe(202);
+    const j = await job(h, r.body.jobId);
+    expect(j.status).toBe('FAILED');
+    expect(j.error_message).toMatch(/budget/i);
+  });
+
+  it('le délai porte sur le dernier maillon : un livre long survit, un livre bloqué non', async () => {
+    const { project, chapters } = await writingProject(h, u, 1, 2200, { reformulated_concept: '[[SLOW]]' });
+    const id = await start(project.id);
+    await until(async () => (await scenesOf(h, chapters[0]!.id)).some((s) => s.status === 'GENERATING' && s.draft));
+    await h.su.collection('generation_jobs').update(id, { started_at: '2020-01-01 00:00:00.000Z' });
+    await (h.deps.jobs as any).sweep();
+    expect(h.deps.jobs.activeJobs.get(id)?.timedOut).toBe(false);
+
+    const sweepLater = new Date(Date.now() + 2 * h.env.JOB_TIMEOUT_MINUTES * 60_000);
+    const now = Date.now;
+    Date.now = () => sweepLater.getTime();
+    try {
+      await (h.deps.jobs as any).sweep();
+    } finally {
+      Date.now = now;
+    }
+    const j = await job(h, id);
+    expect(j.status).toBe('FAILED');
+    expect(j.error_message).toMatch(/délai/i);
   });
 });
 

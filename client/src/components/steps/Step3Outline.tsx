@@ -70,7 +70,7 @@ export function Step3Outline({ project }: { project: Project }) {
   const job = useProjectStore((s) => s.activeJob);
   const [feedback, setFeedback] = useState('');
   const [newTitle, setNewTitle] = useState('');
-  const { busy, error, run } = useAction();
+  const { busy, doing, error, run } = useAction();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -123,15 +123,16 @@ export function Step3Outline({ project }: { project: Project }) {
         <Button
           variant="secondary"
           disabled={busy}
+          loading={doing === 'outline'}
           onClick={() =>
             void run(async () => {
               await flushAllAutosaves();
               await api.outline(project.id, feedback || undefined);
               await load();
-            })
+            }, 'outline')
           }
         >
-          <RefreshCw size={14} /> Régénérer
+          {doing !== 'outline' && <RefreshCw size={14} />} {doing === 'outline' ? 'Génération de la trame…' : 'Régénérer'}
         </Button>
       </Card>
 

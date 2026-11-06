@@ -2,7 +2,7 @@
 
 Légende : ✅ vérifié · 🤖 vérifié avec l'API simulée seulement · ⏳ à faire par un humain
 
-Le simulateur (`server/scripts/mock-openrouter.ts`) passe par le vrai SDK et reproduit le protocole, mais **aucun appel de génération n'a atteint la vraie API OpenRouter** : aucune clé n'était disponible. Seul le catalogue public des modèles a été lu. Le code n'a donc jamais été confronté à la validation réelle des requêtes.
+Le simulateur (`server/scripts/mock-openrouter.ts`) passe par le vrai SDK et reproduit le protocole, mais **le pipeline complet n'a pas encore tourné sur la vraie API OpenRouter**. Seuls deux appels très courts ont réussi avec `nvidia/nemotron-3.5-super-vl:free` : une sortie structurée simple et un flux. Ni les schémas complets, ni le cache, ni la tenue de la cible de mots ne sont donc vérifiés. Le code n'a donc jamais été confronté à la validation réelle des requêtes.
 
 ## Tranche 0 : prompts, extraction, diff
 
@@ -47,6 +47,18 @@ Le simulateur (`server/scripts/mock-openrouter.ts`) passe par le vrai SDK et rep
 | Tuer le serveur puis le relancer : plus de scène en `GENERATING` | ✅ | Test avec vrai `SIGKILL` |
 | Rouvrir le chapitre 2 alors que le 4 est validé périme les chapitres 3 et 4 | ✅ | Test d'intégration |
 | Budget dépassé : message clair, aucun appel IA | ✅ | Test d'intégration |
+
+## Écriture automatique et statistiques
+
+| Critère | État | Preuve |
+|---|---|---|
+| Un livre s'écrit, se valide et se clôt seul après l'échantillon | 🤖 | Tests d'intégration et navigateur, sur le simulateur |
+| Arrêter puis relancer reprend sans refaire ce qui est fait | 🤖 | Test d'intégration et navigateur |
+| « Tout écrire » refait les chapitres écrits mais non validés, sans toucher aux chapitres validés | 🤖 | Tests d'intégration et navigateur |
+| « Réécrire le chapitre » refait plan et texte, garde l'ancien dans l'historique, et ne touche à rien si le plan échoue | 🤖 | Tests d'intégration |
+| Une erreur ou un budget épuisé arrête le livre sans valider le chapitre en cours | 🤖 | Tests d'intégration |
+| Les moyennes par étape prédisent la durée réelle | ⏳ | Le simulateur ne dit rien des durées réelles. À comparer sur un vrai livre |
+| La fourchette de prix encadre le coût réel | 🤖 | Test d'intégration sur un livre simulé. À confirmer sur un vrai livre : le simulateur ne facture pas de réflexion et les ratios tokens par mot sont théoriques |
 
 ## Tranche 5 : export et déploiement
 

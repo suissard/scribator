@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { pb } from '@/api/pocketbase';
 import { Button } from '@/components/ui/button';
+import { LogPanel } from './LogPanel';
 import { UsageBadge } from './UsageBadge';
 
 export function AppShell({ children, usageKey }: { children: ReactNode; usageKey?: unknown }) {
@@ -18,6 +19,7 @@ export function AppShell({ children, usageKey }: { children: ReactNode; usageKey
           <Link to="/privacy" className="hidden text-xs text-muted hover:text-ink sm:inline">
             Confidentialité
           </Link>
+          <LogPanel />
           <Button
             variant="ghost"
             size="icon"

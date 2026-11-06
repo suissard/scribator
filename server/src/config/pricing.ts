@@ -13,6 +13,8 @@ export interface TokenUsage {
 export interface TokenPrice {
   input: number;
   output: number;
+  /** Prix d'un token lu depuis le cache. Absent : le modèle n'en annonce pas. */
+  cacheRead?: number;
 }
 
 /** Modèle absent du catalogue : tarif élevé, le budget ne doit jamais être sous-estimé. */

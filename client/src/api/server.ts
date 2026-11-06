@@ -1,7 +1,7 @@
 import type { ModelOption } from '@/lib/types';
+import { apiUrl } from '@/lib/config';
+import { log } from '@/lib/logger';
 import { pb } from './pocketbase';
-
-export const apiUrl: string = import.meta.env.VITE_API_SERVER_URL ?? 'http://127.0.0.1:3001/api';
 
 export class ApiError extends Error {
   constructor(
@@ -15,6 +15,8 @@ export class ApiError extends Error {
 
 async function request(method: string, path: string, body?: unknown): Promise<Response> {
   let res: Response;
+  const started = performance.now();
+  const route = `${method} ${path.split('?')[0]}`;
   try {
     res = await fetch(`${apiUrl}${path}`, {
       method,
@@ -25,18 +27,41 @@ async function request(method: string, path: string, body?: unknown): Promise<Re
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
   } catch {
+    log.error(`Serveur injoignable : ${route}`);
     throw new ApiError('Le serveur est injoignable. Vérifie ta connexion.', 0);
   }
+  const ms = Math.round(performance.now() - started);
+  const requestId = res.headers.get('x-request-id') ?? undefined;
   if (!res.ok) {
-    const data = (await res.json().catch(() => null)) as { message?: string; request_id?: string } | null;
-    throw new ApiError(data?.message ?? 'Une erreur est survenue.', res.status, data?.request_id ?? res.headers.get('x-request-id') ?? undefined);
+    const data = (await res.json().catch(() => null)) as { error?: string; message?: string; request_id?: string } | null;
+    const id = data?.request_id ?? requestId;
+    log.warn(`${route} : ${res.status}`, { status: res.status, ms, error: data?.error, message: data?.message, request_id: id });
+    throw new ApiError(data?.message ?? 'Une erreur est survenue.', res.status, id);
   }
+  log.info(`${route} : ${res.status}`, { ms, request_id: requestId });
   return res;
 }
 
 const json = async <T>(method: string, path: string, body?: unknown) => (await (await request(method, path, body)).json()) as T;
 
 export interface Usage { spent_usd: number; budget_usd: number }
+
+export interface BookEstimate {
+  chapters: number; plans: number; scenes: number; rewrites: number; duration_ms: number; basis: 'history' | 'default';
+  model: string; input_tokens: number; cacheable_tokens: number; output_tokens: number;
+  cost_low_usd: number; cost_high_usd: number; budget_left_usd: number;
+}
+
+export interface UsageTotals {
+  calls: number; failed_calls: number; duration_ms: number; input_tokens: number; output_tokens: number;
+  cache_read_tokens: number; cache_write_tokens: number; cost_usd: number;
+}
+
+export interface PurposeUsage extends UsageTotals { purpose: string; avg_duration_ms: number }
+
+export interface GenerationReport {
+  totals: UsageTotals; by_purpose: PurposeUsage[]; words: number; truncated_scenes: number; cost_per_1000_words: number | null;
+}
 
 export const api = {
   models: () => json<{ default_model: string; models: ModelOption[] }>('GET', '/models'),
@@ -45,6 +70,9 @@ export const api = {
   outline: (id: string, userFeedback?: string) => json('POST', `/projects/${id}/outline`, { userFeedback }),
   sample: (id: string) => json<{ jobId: string }>('POST', `/projects/${id}/sample`, {}),
   approveSample: (id: string) => json('POST', `/projects/${id}/sample/approve`, {}),
+  writeAll: (id: string) => json<{ jobId: string }>('POST', `/projects/${id}/write-all`, {}),
+  estimate: (id: string) => json<BookEstimate>('GET', `/projects/${id}/estimate`),
+  report: (id: string) => json<GenerationReport>('GET', `/projects/${id}/report`),
   patchStyle: (id: string, style: unknown) => json('PATCH', `/projects/${id}/style`, style),
   patchBible: (id: string, bible: unknown) => json('PATCH', `/projects/${id}/bible`, bible),
   addChapter: (id: string, title: string) => json('POST', `/projects/${id}/chapters`, { title }),
@@ -52,6 +80,7 @@ export const api = {
   reorder: (projectId: string, orderedIds: string[]) => json('POST', '/chapters/reorder', { projectId, orderedIds }),
   planScenes: (id: string) => json('POST', `/chapters/${id}/plan-scenes`, {}),
   writeChapter: (id: string) => json<{ jobId: string }>('POST', `/chapters/${id}/write`, {}),
+  rewriteChapter: (id: string) => json<{ jobId: string }>('POST', `/chapters/${id}/rewrite`, {}),
   approveChapter: (id: string) => json('POST', `/chapters/${id}/approve`, {}),
   reopenChapter: (id: string) => json('POST', `/chapters/${id}/reopen`, {}),
   refreshMemory: (id: string) => json('POST', `/chapters/${id}/refresh-memory`, {}),

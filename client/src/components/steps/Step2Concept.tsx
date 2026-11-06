@@ -169,7 +169,7 @@ function BibleEditor({ project }: { project: Project }) {
 
 export function Step2Concept({ project }: { project: Project }) {
   const [feedback, setFeedback] = useState('');
-  const { busy, error, run } = useAction();
+  const { busy, doing, error, run } = useAction();
   const save = useAutoSave<string>((reformulated_concept) => pb.collection('projects').update(project.id, { reformulated_concept }));
   const earlyStage = STATUS_ORDER.indexOf(project.status) <= 1;
 
@@ -204,14 +204,15 @@ export function Step2Concept({ project }: { project: Project }) {
       <div className="flex justify-end">
         <Button
           disabled={busy}
+          loading={doing === 'outline'}
           onClick={() =>
             void run(async () => {
               await flushAllAutosaves();
               await api.outline(project.id);
-            })
+            }, 'outline')
           }
         >
-          {busy ? 'Génération de la trame…' : earlyStage ? 'Valider et générer la trame' : 'Compléter la trame'} <ArrowRight size={16} />
+          {doing === 'outline' ? 'Génération de la trame…' : earlyStage ? 'Valider et générer la trame' : 'Compléter la trame'} <ArrowRight size={16} />
         </Button>
       </div>
     </div>

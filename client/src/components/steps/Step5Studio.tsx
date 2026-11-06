@@ -1,11 +1,13 @@
-import { AlertTriangle, Check, ListTree, PenLine, RotateCcw } from 'lucide-react';
-import { useEffect } from 'react';
+import { AlertTriangle, Check, ListTree, PenLine, RefreshCw, RotateCcw } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '@/api/server';
 import { SceneBlock } from '@/components/editor/SceneBlock';
 import { ModelSettings } from '@/components/ModelSettings';
 import { PendingChangeCard } from '@/components/review/PendingChangeCard';
+import { AutoWriteCard } from '@/components/steps/AutoWriteCard';
 import { Button } from '@/components/ui/button';
 import { Badge, Card } from '@/components/ui/card';
+import { Dialog } from '@/components/ui/dialog';
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { flushAllAutosaves } from '@/lib/autosaveRegistry';
 import type { Chapter, ChapterStatus, Project } from '@/lib/types';
@@ -26,16 +28,17 @@ const STATUS: Record<ChapterStatus, { label: string; className: string }> = {
 function ChapterActions({ chapter, previous }: { chapter: Chapter; previous: Chapter | undefined }) {
   const scenes = useProjectStore((s) => s.scenes);
   const job = useProjectStore((s) => s.activeJob);
-  const { busy, error, run } = useAction();
+  const { busy, doing, error, run } = useAction();
+  const [confirmRewrite, setConfirmRewrite] = useState(false);
   const running = job !== null;
   const blocked = previous && previous.status !== 'APPROVED';
   const hasPendingScenes = scenes.some((s) => s.status === 'PENDING');
   const allReview = scenes.length > 0 && scenes.every((s) => s.status === 'REVIEW');
-  const act = (fn: () => Promise<unknown>) =>
+  const act = (name: string, fn: () => Promise<unknown>) =>
     void run(async () => {
       await flushAllAutosaves();
       await fn();
-    });
+    }, name);
 
   return (
     <div className="space-y-2">
@@ -44,31 +47,49 @@ function ChapterActions({ chapter, previous }: { chapter: Chapter; previous: Cha
       <div className="flex flex-wrap gap-2">
         {['PENDING', 'PLANNED', 'ERROR', 'REVIEW'].includes(chapter.status) && !blocked && (chapter.status !== 'REVIEW' || hasPendingScenes) && (
           <>
-            <Button variant="secondary" disabled={busy || running} onClick={() => act(() => api.planScenes(chapter.id))}>
-              <ListTree size={16} /> {hasPendingScenes ? 'Replanifier les scènes' : 'Planifier les scènes'}
+            <Button variant="secondary" disabled={busy || running} loading={doing === 'plan'} onClick={() => act('plan', () => api.planScenes(chapter.id))}>
+              {doing !== 'plan' && <ListTree size={16} />} {hasPendingScenes ? 'Replanifier les scènes' : 'Planifier les scènes'}
             </Button>
-            <Button disabled={busy || running} onClick={() => act(() => api.writeChapter(chapter.id))}>
+            <Button disabled={busy || running} onClick={() => act('write', () => api.writeChapter(chapter.id))}>
               <PenLine size={16} /> Écrire le chapitre
             </Button>
           </>
         )}
         {chapter.status === 'REVIEW' && (
-          <Button disabled={busy || running || !allReview} onClick={() => act(() => api.approveChapter(chapter.id))}>
-            <Check size={16} /> {busy ? 'Validation…' : 'Valider le chapitre'}
+          <Button disabled={busy || running || !allReview} loading={doing === 'approve'} onClick={() => act('approve', () => api.approveChapter(chapter.id))}>
+            {doing !== 'approve' && <Check size={16} />} {doing === 'approve' ? 'Validation…' : 'Valider le chapitre'}
+          </Button>
+        )}
+        {chapter.status === 'REVIEW' && !blocked && (
+          <Button variant="secondary" disabled={busy || running} onClick={() => setConfirmRewrite(true)}>
+            <RefreshCw size={16} /> Réécrire le chapitre
           </Button>
         )}
         {(chapter.status === 'APPROVED' || chapter.status === 'STALE') && (
-          <Button variant="secondary" disabled={busy || running} onClick={() => act(() => api.reopenChapter(chapter.id))}>
+          <Button variant="secondary" disabled={busy || running} onClick={() => act('reopen', () => api.reopenChapter(chapter.id))}>
             <RotateCcw size={16} /> Modifier ce chapitre
           </Button>
         )}
         {chapter.status === 'STALE' && (
           <>
-            <Button disabled={busy || running} onClick={() => act(() => api.refreshMemory(chapter.id))}>Recalculer la mémoire</Button>
-            <Button variant="ghost" disabled={busy || running} onClick={() => act(() => api.ignoreStale(chapter.id))}>Ignorer</Button>
+            <Button disabled={busy || running} loading={doing === 'refresh'} onClick={() => act('refresh', () => api.refreshMemory(chapter.id))}>Recalculer la mémoire</Button>
+            <Button variant="ghost" disabled={busy || running} onClick={() => act('ignore', () => api.ignoreStale(chapter.id))}>Ignorer</Button>
           </>
         )}
       </div>
+      <Dialog open={confirmRewrite} onOpenChange={setConfirmRewrite} title="Réécrire tout le chapitre ?" description="Un nouveau plan remplace les scènes actuelles, puis chaque scène est réécrite. Les anciens textes restent dans l'historique des scènes.">
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setConfirmRewrite(false)}>Annuler</Button>
+          <Button
+            onClick={() => {
+              setConfirmRewrite(false);
+              act('rewrite', () => api.rewriteChapter(chapter.id));
+            }}
+          >
+            Réécrire
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
@@ -92,6 +113,16 @@ export function Step5Studio({ project }: { project: Project }) {
   useEffect(() => {
     if (activeId) void loadScenes(activeId);
   }, [activeId, loadScenes]);
+
+  // L'écriture automatique emmène le lecteur avec elle, sauf s'il est parti lire un autre chapitre.
+  const followed = useRef('');
+  const writingId = job?.kind === 'BOOK' ? job.progress?.chapter_id : '';
+  useEffect(() => {
+    if (!writingId || writingId === followed.current) return;
+    const wasFollowing = !followed.current || followed.current === activeId;
+    followed.current = writingId;
+    if (wasFollowing) setActive(writingId);
+  }, [writingId, activeId, setActive]);
 
   const index = chapters.findIndex((c) => c.id === activeId);
   const chapter = chapters[index];
@@ -119,6 +150,7 @@ export function Step5Studio({ project }: { project: Project }) {
       </aside>
 
       <section className="min-w-0 space-y-4">
+        {project.status === 'STEP_5_WRITING' && !job && chapters.some((c) => c.status !== 'APPROVED') && <AutoWriteCard project={project} />}
         {chapter && (
           <>
             <header>
@@ -132,7 +164,8 @@ export function Step5Studio({ project }: { project: Project }) {
             )}
             <ChapterActions chapter={chapter} previous={chapters[index - 1]} />
             {scenes.map((s) => (
-              <SceneBlock key={s.id} scene={s} locked={job !== null} />
+              // Une réécriture change le plan d'une scène existante : le champ doit repartir du nouveau.
+              <SceneBlock key={`${s.id}:${s.status}`} scene={s} locked={job !== null} />
             ))}
             {scenes.length === 0 && <p className="text-sm text-muted">Aucune scène pour l'instant.</p>}
           </>

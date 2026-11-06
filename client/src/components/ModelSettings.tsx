@@ -11,8 +11,6 @@ import { useAction } from '@/lib/useAction';
 import { cn, formatNumber } from '@/lib/utils';
 import { useProjectStore } from '@/store/useProjectStore';
 
-const MAX_SHOWN = 60;
-
 const price = (m: ModelOption) =>
   m.free ? 'Gratuit' : `${m.input_per_million.toFixed(2)} $ / ${m.output_per_million.toFixed(2)} $ par million de tokens`;
 
@@ -80,19 +78,19 @@ export function ModelSettings({ project, compact }: { project: Project; compact?
         <div className="space-y-3">
           <div className="relative">
             <Search size={14} className="absolute left-3 top-3 text-muted" />
-            <Input aria-label="Rechercher un modèle" className="pl-8" placeholder="claude, gemini, deepseek…" value={query} onChange={(e) => setQuery(e.target.value)} />
+            <Input aria-label="Rechercher un modèle" className="pl-8" placeholder="Nom du modèle ou du fournisseur" value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" className="accent-[var(--color-accent)]" checked={freeOnly} onChange={(e) => setFreeOnly(e.target.checked)} />
             Modèles gratuits uniquement
           </label>
-          {freeOnly && <p className="text-xs text-muted">Les modèles gratuits ont un quota quotidien partagé par tout le serveur, et leur qualité varie beaucoup.</p>}
+          {freeOnly && <p className="text-xs text-muted">Les modèles gratuits ont un quota quotidien partagé par tout le serveur et leur qualité varie beaucoup. Beaucoup exigent aussi d'autoriser l'entraînement sur tes textes dans les réglages d'OpenRouter.</p>}
           <ErrorNote error={error} />
           <ul className="max-h-80 space-y-1 overflow-y-auto">
             {!query && !freeOnly && (
               <Option selected={!current} label="Modèle par défaut" detail={catalog?.default_model ?? ''} onPick={() => pick('')} disabled={busy} />
             )}
-            {shown.slice(0, MAX_SHOWN).map((m) => (
+            {shown.map((m) => (
               <Option
                 key={m.id}
                 selected={current === m.id}
@@ -104,7 +102,7 @@ export function ModelSettings({ project, compact }: { project: Project; compact?
               />
             ))}
           </ul>
-          {shown.length > MAX_SHOWN && <p className="text-xs text-muted">{shown.length - MAX_SHOWN} autres modèles : affine ta recherche.</p>}
+          {catalog && shown.length > 0 && <p className="text-xs tabular-nums text-muted">{formatNumber(shown.length)} modèles, dans l'ordre du catalogue OpenRouter.</p>}
           {catalog && shown.length === 0 && <p className="text-sm text-muted">Aucun modèle ne correspond.</p>}
         </div>
       </Dialog>

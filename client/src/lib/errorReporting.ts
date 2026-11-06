@@ -1,11 +1,7 @@
-import { apiUrl } from '@/api/server';
+import { log } from './logger';
 
 export function reportError(message: string, stack?: string, request_id?: string): void {
-  void fetch(`${apiUrl}/client-errors`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ message: message.slice(0, 2000), stack: stack?.slice(0, 10_000), route: location.pathname, request_id }),
-  }).catch(() => {});
+  log.error(message, request_id ? { request_id } : undefined, stack);
 }
 
 export function installGlobalHandlers(): void {

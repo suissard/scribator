@@ -14,10 +14,11 @@
     "pb:fetch": "bash scripts/fetch-pocketbase.sh",
     "pb": "cd pocketbase && ./pocketbase serve --http=127.0.0.1:8090 --dir=pb_data --migrationsDir=pb_migrations --hooksDir=pb_hooks",
     "dev": "concurrently -n pb,server,client -c gray,blue,green \"npm run pb\" \"npm run dev -w server\" \"npm run dev -w client\"",
+    "pb:mock": "cd pocketbase && ./pocketbase superuser upsert dev-superuser@scribator.test dev-superuser-password --dir=pb_data_mock --migrationsDir=pb_migrations && ./pocketbase serve --http=127.0.0.1:8090 --dir=pb_data_mock --migrationsDir=pb_migrations --hooksDir=pb_hooks",
     "build": "npm run build -w server && npm run build -w client",
     "test": "npm run test -w server",
     "start": "npm run start -w server",
-    "dev:mock": "concurrently -k -n pb,mock,server,client -c gray,magenta,blue,green \"npm run pb\" \"npm run mock:openrouter -w server\" \"npm run dev:mock -w server\" \"npm run dev -w client\"",
+    "dev:mock": "concurrently -k -n pb,mock,server,client -c gray,magenta,blue,green \"npm run pb:mock\" \"npm run mock:openrouter -w server\" \"npm run dev:mock -w server\" \"npm run dev -w client\"",
     "seed:dev": "node scripts/seed-dev.mjs"
   },
   "devDependencies": {

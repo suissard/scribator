@@ -46,9 +46,20 @@ export interface Scene {
   status: 'PENDING' | 'GENERATING' | 'REVIEW' | 'APPROVED'; scene_break_before: boolean; truncated: boolean;
 }
 
+export type StageKey = 'read' | 'style' | 'concept' | 'sample' | 'plan' | 'write' | 'memory';
+
+export interface JobStage {
+  key: StageKey; done: number; total: number; avg_ms: number; basis: 'run' | 'history' | 'default';
+}
+
+export interface JobProgress {
+  current: number; total: number; stages: JobStage[];
+  active: StageKey | null; active_since: string | null; detail: string; chapter_id: string;
+}
+
 export interface Job {
-  id: string; project: string; kind: 'ANALYZE' | 'SAMPLE' | 'CHAPTER' | 'SCENE'; target_id: string;
-  status: 'RUNNING' | 'DONE' | 'CANCELLED' | 'FAILED'; progress: { current: number; total: number } | null;
+  id: string; project: string; kind: 'ANALYZE' | 'SAMPLE' | 'CHAPTER' | 'SCENE' | 'BOOK'; target_id: string;
+  status: 'RUNNING' | 'DONE' | 'CANCELLED' | 'FAILED'; progress: JobProgress | null;
   error_message: string; created: string;
 }
 

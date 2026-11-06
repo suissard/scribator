@@ -1,9 +1,8 @@
-import { Square } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api } from '@/api/server';
 import { subscribe } from '@/api/realtime';
 import { AppShell } from '@/components/layout/AppShell';
+import { JobBar } from '@/components/layout/JobBar';
 import { maxStep, StepIndicator } from '@/components/layout/StepIndicator';
 import { Step1Input } from '@/components/steps/Step1Input';
 import { Step2Concept } from '@/components/steps/Step2Concept';
@@ -11,49 +10,11 @@ import { Step3Outline } from '@/components/steps/Step3Outline';
 import { Step4Sample } from '@/components/steps/Step4Sample';
 import { Step5Studio } from '@/components/steps/Step5Studio';
 import { Step6Export } from '@/components/steps/Step6Export';
-import { Button } from '@/components/ui/button';
-import { Dialog } from '@/components/ui/dialog';
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { pb } from '@/api/pocketbase';
 import type { Chapter, Job, PendingChange, Project, Scene } from '@/lib/types';
-import { useAction } from '@/lib/useAction';
+import { log } from '@/lib/logger';
 import { useProjectStore } from '@/store/useProjectStore';
-
-const JOB_LABELS: Record<Job['kind'], string> = {
-  ANALYZE: 'Analyse en cours',
-  SAMPLE: "Rédaction de l'échantillon",
-  CHAPTER: 'Écriture du chapitre',
-  SCENE: 'Régénération de la scène',
-};
-
-function JobBar({ job }: { job: Job }) {
-  const [asking, setAsking] = useState(false);
-  const { busy, error, run } = useAction();
-  const stop = (keepPartial: boolean) => {
-    setAsking(false);
-    void run(() => api.cancelJob(job.id, keepPartial));
-  };
-  return (
-    <div className="border-b border-line bg-accent-soft px-4 py-2">
-      <div className="flex items-center justify-between gap-4">
-        <p role="status" className="text-sm text-accent">
-          {JOB_LABELS[job.kind]}
-          {job.progress && job.kind !== 'SCENE' && ` : étape ${job.progress.current} sur ${job.progress.total}`}…
-        </p>
-        <Button size="sm" variant="secondary" disabled={busy} onClick={() => (job.kind === 'ANALYZE' ? stop(false) : setAsking(true))}>
-          <Square size={12} /> Arrêter la génération
-        </Button>
-      </div>
-      <ErrorNote error={error} />
-      <Dialog open={asking} onOpenChange={setAsking} title="Arrêter la génération ?" description="Le texte déjà écrit peut être conservé.">
-        <div className="flex justify-end gap-2">
-          <Button variant="danger" onClick={() => stop(false)}>Tout jeter</Button>
-          <Button onClick={() => stop(true)}>Garder le début</Button>
-        </div>
-      </Dialog>
-    </div>
-  );
-}
 
 export function ProjectWorkspace() {
   const { id = '' } = useParams();
@@ -84,6 +45,9 @@ export function ProjectWorkspace() {
       subscribe<Job>('generation_jobs', pb.filter('project = {:id}', { id }), (e) => {
         const store = useProjectStore.getState();
         store.applyJob(e.record);
+        const job = { job_id: e.record.id, status: e.record.status, detail: e.record.progress?.detail };
+        if (e.record.status === 'FAILED') log.error(`Job ${e.record.kind} en échec : ${e.record.error_message}`, job);
+        else log.info(`Job ${e.record.kind} : ${e.record.status}`, job);
         if (e.record.status !== 'RUNNING') {
           setUsageKey((k) => k + 1);
           // Filet de sécurité : un événement Realtime a pu être perdu pendant le job.
@@ -109,6 +73,7 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!project || project.status === shownStatus.current) return;
     shownStatus.current = project.status;
+    log.info(`Projet : statut ${project.status}`);
     useProjectStore.getState().setStep(Math.min(maxStep(project.status), project.status === 'COMPLETED' ? 6 : 5) as 1);
   }, [project]);
 

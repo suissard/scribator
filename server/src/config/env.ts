@@ -6,12 +6,15 @@ const bool = z.enum(['true', 'false']).transform((v) => v === 'true');
 const AiEnvSchema = z.object({
   OPENROUTER_API_KEY: z.string().min(1),
   OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
+  // Catalogue de modèles, s'il ne vient pas de OPENROUTER_BASE_URL (simulateur local).
+  OPENROUTER_CATALOG_URL: z.string().url().optional(),
   // « deny » exclut les fournisseurs susceptibles de stocker les manuscrits.
   OPENROUTER_DATA_COLLECTION: z.enum(['allow', 'deny']).default('deny'),
-  AI_MODEL_CREATIVE: z.string().default('anthropic/claude-sonnet-5.5'),
-  AI_MODEL_FAST: z.string().default('anthropic/claude-haiku-5.5'),
+  // Aucun modèle par défaut : le choix appartient à qui installe, parmi le catalogue d'OpenRouter.
+  AI_MODEL_CREATIVE: z.string().min(1),
+  AI_MODEL_FAST: z.string().min(1),
   // Modèle retenté quand un autre refuse un passage. Vide : pas de nouvel essai.
-  AI_MODEL_REFUSAL_FALLBACK: z.string().default('anthropic/claude-opus-5'),
+  AI_MODEL_REFUSAL_FALLBACK: z.string().default(''),
   AI_EFFORT_CREATIVE: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).default('medium'),
   LOG_PROMPTS: bool.default(false),
 });

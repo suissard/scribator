@@ -1,17 +1,13 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { callContext, guardedAi, guardedJob, type Deps } from '../deps.js';
 import { badRequest, conflict } from '../lib/errors.js';
 import { authenticate, getOwned } from '../middlewares/auth.js';
-import { settledChapterStatus } from '../services/jobs.service.js';
-import {
-  allApproved, chaptersToStale, chapterText, computeDiff, invalidateSynopsis, STYLE_DIFF_THRESHOLD_PERCENT,
-} from '../services/memory.service.js';
+import { settledChapterStatus, type JobHandle } from '../services/jobs.service.js';
+import { chaptersToStale, invalidateSynopsis } from '../services/memory.service.js';
 import { reorderPending } from '../services/outline.service.js';
 import type { ChapterRecord, ProjectRecord } from '../types.js';
 import { aiRoute } from './shared.js';
-
-const nowIso = () => new Date().toISOString().replace('T', ' ');
 
 export function chapterRoutes(app: FastifyInstance, deps: Deps): void {
   const { pb, gen, jobs, env, locks } = deps;
@@ -22,19 +18,36 @@ export function chapterRoutes(app: FastifyInstance, deps: Deps): void {
     if (p.status !== 'STEP_5_WRITING') throw conflict("Valide d'abord l'échantillon.");
   };
 
-  /** §4.2 : statut final du projet, recalculé après tout changement de la liste des chapitres. */
-  async function syncCompletion(projectId: string): Promise<void> {
-    const project = await gen.getProject(projectId);
-    const chapters = await gen.listChapters(projectId);
-    if (project.status === 'STEP_5_WRITING' && allApproved(chapters)) {
-      await pb.collection('projects').update(projectId, { status: 'COMPLETED' });
-    } else if (project.status === 'COMPLETED' && !allApproved(chapters)) {
-      await pb.collection('projects').update(projectId, { status: 'STEP_5_WRITING' });
+  async function renumber(ids: string[]): Promise<void> {
+    for (const [i, id] of ids.entries()) await pb.collection('chapters').update(id, { chapter_number: i + 1 });
+  }
+
+  async function assertPreviousApproved(chapter: ChapterRecord): Promise<void> {
+    const chapters = await gen.listChapters(chapter.project);
+    const previous = chapters.find((c) => c.chapter_number === chapter.chapter_number - 1);
+    if (previous && previous.status !== 'APPROVED') {
+      throw conflict(`Le chapitre ${previous.chapter_number} doit être validé avant celui-ci.`);
     }
   }
 
-  async function renumber(ids: string[]): Promise<void> {
-    for (const [i, id] of ids.entries()) await pb.collection('chapters').update(id, { chapter_number: i + 1 });
+  async function launchChapterJob(req: FastifyRequest, chapter: ChapterRecord, run: (job: JobHandle) => Promise<void>): Promise<string> {
+    await guardedJob(deps, req, chapter.project);
+    try {
+      await pb.collection('chapters').update(chapter.id, { status: 'GENERATING' });
+    } catch (e) {
+      locks.release(chapter.project);
+      throw e;
+    }
+    return jobs.launch({
+      userId: req.user.id, projectId: chapter.project, kind: 'CHAPTER', targetId: chapter.id,
+      requestId: req.id, logger: req.log,
+      run,
+      onSettled: async (outcome) => {
+        const list = await gen.listScenes(chapter.id);
+        const map = { DONE: 'done', CANCELLED: 'cancelled', FAILED: 'failed' } as const;
+        await pb.collection('chapters').update(chapter.id, { status: settledChapterStatus(list, map[outcome]) });
+      },
+    });
   }
 
   app.post<C>('/chapters/:id/plan-scenes', aiRoute(auth), async (req) => {
@@ -50,11 +63,7 @@ export function chapterRoutes(app: FastifyInstance, deps: Deps): void {
   app.post<C>('/chapters/:id/write', aiRoute(auth), async (req, reply) => {
     const chapter = await getOwned<ChapterRecord>(req, 'chapters', req.params.id);
     assertWriting(await gen.getProject(chapter.project));
-    const chapters = await gen.listChapters(chapter.project);
-    const previous = chapters.find((c) => c.chapter_number === chapter.chapter_number - 1);
-    if (previous && previous.status !== 'APPROVED') {
-      throw conflict(`Le chapitre ${previous.chapter_number} doit être validé avant celui-ci.`);
-    }
+    await assertPreviousApproved(chapter);
     if (['GENERATING', 'APPROVED', 'STALE'].includes(chapter.status)) {
       throw conflict('Ce chapitre ne peut pas être généré dans son état actuel.');
     }
@@ -62,68 +71,22 @@ export function chapterRoutes(app: FastifyInstance, deps: Deps): void {
     if (chapter.status === 'REVIEW' && !scenes.some((s) => s.status === 'PENDING')) {
       throw conflict('Toutes les scènes sont déjà écrites. Régénère une scène ou valide le chapitre.');
     }
-    await guardedJob(deps, req, chapter.project);
-    try {
-      await pb.collection('chapters').update(chapter.id, { status: 'GENERATING' });
-    } catch (e) {
-      locks.release(chapter.project);
-      throw e;
-    }
-    const jobId = await jobs.launch({
-      userId: req.user.id, projectId: chapter.project, kind: 'CHAPTER', targetId: chapter.id,
-      requestId: req.id, logger: req.log,
-      run: (job) => gen.writeChapter(job, chapter.id),
-      onSettled: async (outcome) => {
-        const list = await gen.listScenes(chapter.id);
-        const map = { DONE: 'done', CANCELLED: 'cancelled', FAILED: 'failed' } as const;
-        await pb.collection('chapters').update(chapter.id, { status: settledChapterStatus(list, map[outcome]) });
-      },
-    });
+    const jobId = await launchChapterJob(req, chapter, (job) => gen.writeChapter(job, chapter.id));
+    return reply.code(202).send({ jobId });
+  });
+
+  app.post<C>('/chapters/:id/rewrite', aiRoute(auth), async (req, reply) => {
+    const chapter = await getOwned<ChapterRecord>(req, 'chapters', req.params.id);
+    assertWriting(await gen.getProject(chapter.project));
+    await assertPreviousApproved(chapter);
+    if (chapter.status !== 'REVIEW') throw conflict('Rouvre ce chapitre avant de le réécrire.');
+    const jobId = await launchChapterJob(req, chapter, (job) => gen.rewriteChapter(job, chapter.id));
     return reply.code(202).send({ jobId });
   });
 
   app.post<C>('/chapters/:id/approve', aiRoute(auth), async (req) => {
     const owned = await getOwned<ChapterRecord>(req, 'chapters', req.params.id);
-    return guardedAi(deps, req, owned.project, async () => {
-      const chapter = await pb.collection('chapters').getOne<ChapterRecord>(owned.id);
-      if (chapter.status !== 'REVIEW') throw conflict("Ce chapitre n'est pas en relecture.");
-      const scenes = await gen.listScenes(chapter.id);
-      if (scenes.length === 0 || scenes.some((s) => s.status !== 'REVIEW')) {
-        throw conflict('Toutes les scènes doivent être écrites et en relecture.');
-      }
-      const project = await gen.getProject(chapter.project);
-      const ctx = callContext(req, project.id);
-      const original = scenes.map((s) => ({ ...s, content: s.ai_original_content }));
-      const diff = computeDiff(chapterText(original), chapterText(scenes));
-
-      // Les appels IA passent avant tout changement d'état : en cas d'échec, l'auteur peut réessayer
-      // sans laisser un chapitre validé sans résumé. L'apprentissage du style, lui, est facultatif.
-      const [memory, suggestion] = await Promise.all([
-        gen.chapterMemory(ctx, project, chapter, scenes),
-        diff.changedPercent > STYLE_DIFF_THRESHOLD_PERCENT && project.style_matrix
-          ? gen.styleLearning(ctx, project.style_matrix, diff).catch((e: unknown) => {
-              req.log.warn({ err: e }, "échec de l'apprentissage du style, validation maintenue");
-              return null;
-            })
-          : Promise.resolve(null),
-      ]);
-
-      for (const s of scenes) await pb.collection('scenes').update(s.id, { status: 'APPROVED' });
-      await pb.collection('chapters').update(chapter.id, {
-        status: 'APPROVED',
-        approved_at: nowIso(),
-        post_writing_summary: memory.summary,
-        stale_reason: '',
-      });
-      if (memory.patch.operations.length > 0) await gen.proposeChange(project.id, 'BIBLE_PATCH', memory.patch, chapter.id);
-      if (suggestion) await gen.proposeChange(project.id, 'STYLE_SUGGESTION', suggestion, chapter.id);
-
-      await gen.compressMemoryIfNeeded(ctx, await gen.getProject(project.id)).catch((e: unknown) => {
-        req.log.warn({ err: e }, 'échec de la compression mémoire, réessai à la prochaine validation');
-      });
-      await syncCompletion(project.id);
-      return { changedPercent: diff.changedPercent };
-    });
+    return guardedAi(deps, req, owned.project, () => gen.approveChapter(callContext(req, owned.project), owned.id));
   });
 
   app.post<C>('/chapters/:id/reopen', { preHandler: auth }, async (req) => {
@@ -147,25 +110,15 @@ export function chapterRoutes(app: FastifyInstance, deps: Deps): void {
       const project = await gen.getProject(chapter.project);
       const invalidated = invalidateSynopsis(project.synopsis_covers_up_to, chapter.chapter_number);
       if (invalidated) await pb.collection('projects').update(project.id, invalidated);
-      await syncCompletion(project.id);
+      await gen.syncCompletion(project.id);
       return { stale: stale.map((c) => c.id) };
     });
   });
 
   app.post<C>('/chapters/:id/refresh-memory', aiRoute(auth), async (req) => {
     const owned = await getOwned<ChapterRecord>(req, 'chapters', req.params.id);
-    return guardedAi(deps, req, owned.project, async () => {
-      const chapter = await pb.collection('chapters').getOne<ChapterRecord>(owned.id);
-      if (chapter.status !== 'STALE') throw conflict("Ce chapitre n'est pas à recalculer.");
-      const project = await gen.getProject(chapter.project);
-      const { summary, patch } = await gen.chapterMemory(
-        callContext(req, project.id), project, chapter, await gen.listScenes(chapter.id),
-      );
-      await pb.collection('chapters').update(chapter.id, { status: 'APPROVED', post_writing_summary: summary, stale_reason: '' });
-      if (patch.operations.length > 0) await gen.proposeChange(project.id, 'BIBLE_PATCH', patch, chapter.id);
-      await syncCompletion(project.id);
-      return { ok: true };
-    });
+    await guardedAi(deps, req, owned.project, () => gen.refreshChapterMemory(callContext(req, owned.project), owned.id));
+    return { ok: true };
   });
 
   app.post<C>('/chapters/:id/ignore-stale', { preHandler: auth }, async (req) => {
@@ -174,7 +127,7 @@ export function chapterRoutes(app: FastifyInstance, deps: Deps): void {
       const chapter = await pb.collection('chapters').getOne<ChapterRecord>(owned.id);
       if (chapter.status !== 'STALE') throw conflict("Ce chapitre n'est pas à recalculer.");
       await pb.collection('chapters').update(chapter.id, { status: 'APPROVED', stale_reason: '' });
-      await syncCompletion(chapter.project);
+      await gen.syncCompletion(chapter.project);
       return { ok: true };
     });
   });
@@ -195,7 +148,7 @@ export function chapterRoutes(app: FastifyInstance, deps: Deps): void {
         user_edited_outline: true,
         status: 'PENDING',
       });
-      await syncCompletion(project.id);
+      await gen.syncCompletion(project.id);
       return { chapter: created };
     });
   });
@@ -207,7 +160,7 @@ export function chapterRoutes(app: FastifyInstance, deps: Deps): void {
       if (chapter.status !== 'PENDING') throw conflict('Seul un chapitre encore en attente peut être supprimé.');
       await pb.collection('chapters').delete(chapter.id);
       await renumber((await gen.listChapters(chapter.project)).map((c) => c.id));
-      await syncCompletion(chapter.project);
+      await gen.syncCompletion(chapter.project);
       return { ok: true };
     });
   });

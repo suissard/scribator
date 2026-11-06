@@ -8,13 +8,15 @@ export interface ModelInfo {
   structuredOutputs: boolean;
   reasoning: boolean;
   efforts: string[] | null;
+  /** Prix négatif dans le catalogue : un routeur, dont le tarif dépend du modèle qu'il choisira. */
+  routed: boolean;
 }
 
 interface RawModel {
   id: string;
   name?: string;
   context_length?: number | null;
-  pricing?: { prompt?: string; completion?: string };
+  pricing?: { prompt?: string; completion?: string; input_cache_read?: string };
   supported_parameters?: string[];
   top_provider?: { max_completion_tokens?: number | null };
   reasoning?: { supported_efforts?: string[] } | null;
@@ -34,15 +36,20 @@ const MEMORY_CONTEXT_SHARE = 0.5;
 export class ModelCatalog {
   private readonly models = new Map<string, ModelInfo>();
 
-  async load(baseUrl: string, log: WarnLogger): Promise<void> {
-    try {
-      const res = await fetch(`${baseUrl}/models`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const { data } = (await res.json()) as { data: RawModel[] };
-      for (const m of data) this.models.set(m.id, toInfo(m));
-    } catch (e) {
-      log.warn({ err: e }, 'catalogue de modèles indisponible, limites par défaut appliquées');
+  /** `catalogUrl` : le simulateur n'a qu'une liste factice, le vrai catalogue est public et sans clé. */
+  async load(baseUrl: string, log: WarnLogger, catalogUrl?: string): Promise<void> {
+    for (const url of [catalogUrl, `${baseUrl}/models`].filter((u) => u !== undefined)) {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { data } = (await res.json()) as { data: RawModel[] };
+        for (const m of data) this.models.set(m.id, toInfo(m));
+        return;
+      } catch (e) {
+        log.warn({ err: e, url }, 'catalogue de modèles indisponible');
+      }
     }
+    log.warn({}, 'aucun catalogue de modèles, limites par défaut appliquées');
   }
 
   get(id: string): ModelInfo | undefined {
@@ -54,10 +61,14 @@ export class ModelCatalog {
     return this.models.size === 0 || this.models.has(id);
   }
 
-  /** Ce qu'un auteur peut choisir : les variantes `:batch` ne servent pas en temps réel. */
+  /**
+   * Ce qu'un auteur peut choisir, dans l'ordre d'OpenRouter : un tri par nom mettrait toujours les
+   * mêmes fournisseurs en tête. Les variantes `:batch` ne servent pas en temps réel, et le coût d'un
+   * routeur ne s'estime pas.
+   */
   selectable(): Array<{ id: string; name: string; input_per_million: number; output_per_million: number; context_length: number; free: boolean }> {
     return [...this.models]
-      .filter(([id, m]) => m.structuredOutputs && !id.endsWith(':batch'))
+      .filter(([id, m]) => m.structuredOutputs && !m.routed && !id.endsWith(':batch'))
       .map(([id, m]) => ({
         id,
         name: m.name,
@@ -65,8 +76,7 @@ export class ModelCatalog {
         output_per_million: m.price.output * 1_000_000,
         context_length: m.contextLength,
         free: m.price.input === 0 && m.price.output === 0,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      }));
   }
 
   /** Une erreur de configuration doit se voir au démarrage, pas au milieu d'un livre. */
@@ -106,11 +116,16 @@ function toInfo(m: RawModel): ModelInfo {
   const params = m.supported_parameters ?? [];
   const input = Number(m.pricing?.prompt);
   const output = Number(m.pricing?.completion);
+  const cacheRead = Number(m.pricing?.input_cache_read);
+  const routed = input < 0 || output < 0;
   return {
     name: m.name ?? m.id,
     contextLength: m.context_length ?? 0,
     maxOutput: m.top_provider?.max_completion_tokens ?? null,
-    price: Number.isFinite(input) && Number.isFinite(output) ? { input, output } : UNKNOWN_MODEL_PRICE,
+    routed,
+    price: Number.isFinite(input) && Number.isFinite(output) && !routed
+      ? { input, output, ...(m.pricing?.input_cache_read && Number.isFinite(cacheRead) ? { cacheRead } : {}) }
+      : UNKNOWN_MODEL_PRICE,
     structuredOutputs: params.includes('structured_outputs'),
     reasoning: params.includes('reasoning'),
     efforts: m.reasoning?.supported_efforts ?? null,

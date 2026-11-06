@@ -27,13 +27,15 @@ export function usageRoutes(app: FastifyInstance, deps: Deps): void {
     async (req) => {
       const body = z
         .object({
+          level: z.enum(['warn', 'error']).default('error'),
           message: z.string().max(2000),
           stack: z.string().max(10_000).optional(),
           route: z.string().max(500).optional(),
           request_id: z.string().max(100).optional(),
+          context: z.record(z.string(), z.unknown()).optional(),
         })
         .parse(req.body);
-      req.log.error({ client_error: body }, 'erreur frontend');
+      req.log[body.level]({ client_error: body }, 'journal frontend');
       return { ok: true };
     },
   );

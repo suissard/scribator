@@ -18,7 +18,7 @@ import { useProjectStore } from '@/store/useProjectStore';
 export function Step4Sample({ project }: { project: Project }) {
   const job = useProjectStore((s) => s.activeJob);
   const [history, setHistory] = useState(false);
-  const { busy, error, run } = useAction();
+  const { busy, doing, error, run } = useAction();
   const save = useAutoSave<string>((sample_text) => pb.collection('projects').update(project.id, { sample_text }));
   const generating = job?.kind === 'SAMPLE';
   const canApprove = project.status === 'STEP_4_SAMPLE_REVIEW';
@@ -57,14 +57,15 @@ export function Step4Sample({ project }: { project: Project }) {
         {canApprove && (
           <Button
             disabled={busy || generating}
+            loading={doing === 'approve'}
             onClick={() =>
               void run(async () => {
                 await flushAllAutosaves();
                 await api.approveSample(project.id);
-              })
+              }, 'approve')
             }
           >
-            <Check size={16} /> Valider l'échantillon
+            {doing !== 'approve' && <Check size={16} />} {doing === 'approve' ? 'Validation…' : "Valider l'échantillon"}
           </Button>
         )}
       </div>

@@ -1,4 +1,5 @@
-import type { AiOutline, AiScenePlan, ChapterRecord } from '../types.js';
+import type { AiOutline, AiScenePlan, ChapterRecord, SceneRecord } from '../types.js';
+import { countWords } from './parser.service.js';
 
 export const isLocked = (c: Pick<ChapterRecord, 'status' | 'user_edited_outline'>) =>
   c.status !== 'PENDING' || c.user_edited_outline;
@@ -39,6 +40,17 @@ export function reorderPending(
 }
 
 export const defaultSceneCount = (targetWords: number) => Math.min(8, Math.max(1, Math.round(targetWords / 1100)));
+
+/** Toutes les scènes sont écrites, mais le chapitre reste trop court : il lui en faut d'autres. */
+export function needsPlanning(chapter: Pick<ChapterRecord, 'target_words'>, scenes: Array<Pick<SceneRecord, 'status' | 'content'>>): boolean {
+  const written = scenes.reduce((n, s) => n + countWords(s.content), 0);
+  return !scenes.some((s) => s.status === 'PENDING') && written < chapter.target_words * 0.8;
+}
+
+/** Écriture automatique : écrit mais non validé, donc à refaire. Avec des scènes à écrire, il reprend plutôt là où il s'est arrêté. */
+export function needsRewrite(chapter: Pick<ChapterRecord, 'status'>, scenes: Array<Pick<SceneRecord, 'status'>>): boolean {
+  return (chapter.status === 'REVIEW' || chapter.status === 'STALE') && !scenes.some((s) => s.status === 'PENDING');
+}
 
 /** Impose le nombre de scènes et ramène la somme des cibles sur l'objectif (§5.5). */
 export function normalizeScenePlan(plan: AiScenePlan, expected: number, totalWords: number): AiScenePlan['scenes'] {

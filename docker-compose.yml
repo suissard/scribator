@@ -28,9 +28,9 @@ services:
       PB_SUPERUSER_PASSWORD: ${PB_SUPERUSER_PASSWORD:?}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?}
       OPENROUTER_DATA_COLLECTION: ${OPENROUTER_DATA_COLLECTION:-deny}
-      AI_MODEL_CREATIVE: ${AI_MODEL_CREATIVE:-anthropic/claude-sonnet-5.5}
-      AI_MODEL_FAST: ${AI_MODEL_FAST:-anthropic/claude-haiku-5.5}
-      AI_MODEL_REFUSAL_FALLBACK: ${AI_MODEL_REFUSAL_FALLBACK-anthropic/claude-opus-5}
+      AI_MODEL_CREATIVE: ${AI_MODEL_CREATIVE:?Choisis un modèle sur openrouter.ai/models}
+      AI_MODEL_FAST: ${AI_MODEL_FAST:?Choisis un modèle sur openrouter.ai/models}
+      AI_MODEL_REFUSAL_FALLBACK: ${AI_MODEL_REFUSAL_FALLBACK:-}
       AI_EFFORT_CREATIVE: ${AI_EFFORT_CREATIVE:-medium}
       LOG_PROMPTS: ${LOG_PROMPTS:-false}
       CORS_ORIGIN: https://${DOMAIN:-localhost}

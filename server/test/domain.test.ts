@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { loadEnv } from '../src/config/env.js';
 import { estimateCostUsd, UNKNOWN_MODEL_PRICE } from '../src/config/pricing.js';
 import { DraftWriter } from '../src/lib/draftWriter.js';
 import { applyBiblePatch, applyStyleSuggestion, bibleWithIds, toBiblePatch, toStyleSuggestion } from '../src/services/bible.service.js';
@@ -172,5 +173,18 @@ describe('DraftWriter', () => {
     await tick();
     await w.stop();
     expect(onError).toHaveBeenCalled();
+  });
+});
+
+describe('configuration des modèles', () => {
+  const base = { OPENROUTER_API_KEY: 'k', POCKETBASE_URL: 'http://127.0.0.1:1', PB_SUPERUSER_EMAIL: 'a@b.fr', PB_SUPERUSER_PASSWORD: 'p' };
+
+  it('n’impose aucun modèle : sans choix, le serveur nomme ce qui manque', () => {
+    expect(() => loadEnv(base)).toThrow(/AI_MODEL_CREATIVE, AI_MODEL_FAST/);
+    expect(() => loadEnv({ ...base, AI_MODEL_CREATIVE: '', AI_MODEL_FAST: '' })).toThrow(/AI_MODEL_CREATIVE/);
+  });
+
+  it('laisse le modèle de repli facultatif et désactivé', () => {
+    expect(loadEnv({ ...base, AI_MODEL_CREATIVE: 'a/b', AI_MODEL_FAST: 'c/d' }).AI_MODEL_REFUSAL_FALLBACK).toBe('');
   });
 });

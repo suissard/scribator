@@ -10,10 +10,13 @@ export interface ActionError {
 /** Exécute une action en gérant l'état occupé et une erreur lisible, jamais une pile d'appels. */
 export function useAction() {
   const [busy, setBusy] = useState(false);
+  const [doing, setDoing] = useState<string | null>(null);
   const [error, setError] = useState<ActionError | null>(null);
 
-  const run = useCallback(async (fn: () => Promise<unknown>): Promise<boolean> => {
+  /** `name` distingue l'action en cours quand plusieurs boutons partagent le même `useAction`. */
+  const run = useCallback(async (fn: () => Promise<unknown>, name?: string): Promise<boolean> => {
     setBusy(true);
+    setDoing(name ?? null);
     setError(null);
     try {
       await fn();
@@ -30,8 +33,9 @@ export function useAction() {
       return false;
     } finally {
       setBusy(false);
+      setDoing(null);
     }
   }, []);
 
-  return { busy, error, run, clearError: useCallback(() => setError(null), []) };
+  return { busy, doing, error, run, clearError: useCallback(() => setError(null), []) };
 }
