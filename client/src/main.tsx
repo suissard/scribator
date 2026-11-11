@@ -1,6 +1,6 @@
 import { StrictMode, useSyncExternalStore, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { pb } from '@/api/pocketbase';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { installGlobalHandlers } from '@/lib/errorReporting';
@@ -20,10 +20,13 @@ function Protected({ children }: { children: ReactNode }) {
   return valid ? children : <Navigate to="/login" replace />;
 }
 
+// Sur GitHub Pages (ou si configuré avec un base path non racine), HashRouter évite les 404 lors du rechargement
+const Router = import.meta.env.BASE_URL !== '/' ? HashRouter : BrowserRouter;
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <BrowserRouter>
+      <Router>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/privacy" element={<Privacy />} />
@@ -31,7 +34,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="/projects/:id" element={<Protected><ProjectWorkspace /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </BrowserRouter>
+      </Router>
     </ErrorBoundary>
   </StrictMode>,
 );
