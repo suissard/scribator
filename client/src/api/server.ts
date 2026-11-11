@@ -1,6 +1,8 @@
 import type { ModelOption } from '@/lib/types';
 import { apiUrl } from '@/lib/config';
 import { log } from '@/lib/logger';
+import { getMockMode } from '@/lib/mockState';
+import { mockApi } from './mockServer';
 import { pb } from './pocketbase';
 
 export class ApiError extends Error {
@@ -63,7 +65,7 @@ export interface GenerationReport {
   totals: UsageTotals; by_purpose: PurposeUsage[]; words: number; truncated_scenes: number; cost_per_1000_words: number | null;
 }
 
-export const api = {
+const realApi = {
   models: () => json<{ default_model: string; models: ModelOption[] }>('GET', '/models'),
   setModel: (id: string, model: string) => json('PATCH', `/projects/${id}/model`, { model }),
   analyze: (id: string, feedback?: string) => json<{ jobId: string }>('POST', `/projects/${id}/analyze`, { feedback }),
@@ -103,3 +105,13 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 };
+
+export const api = new Proxy(realApi, {
+  get(target, prop, receiver) {
+    if (getMockMode()) {
+      const mockMethod = Reflect.get(mockApi, prop);
+      if (mockMethod !== undefined) return mockMethod;
+    }
+    return Reflect.get(target, prop, receiver);
+  },
+}) as typeof realApi;

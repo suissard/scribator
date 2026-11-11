@@ -1,10 +1,33 @@
 import type { RecordModel, RecordSubscription } from 'pocketbase';
+import { getMockMode } from '@/lib/mockState';
 import { pb } from './pocketbase';
 
 type Handler<T> = (e: RecordSubscription<T & RecordModel>) => void;
 
 /** Renvoie une fonction de désabonnement utilisable directement dans un useEffect. */
 export function subscribe<T>(collection: string, filter: string, handler: Handler<T>): () => void {
+  if (getMockMode()) {
+    // Écoute les CustomEvents mock si émis dans la fenêtre
+    const onMockUpdate = (e: Event) => {
+      const custom = e as CustomEvent<{ id?: string; record?: any }>;
+      const id = custom.detail?.id;
+      if (!id) return;
+      void pb
+        .collection(collection)
+        .getOne(id)
+        .then((record) => {
+          handler({ action: 'update', record: record as unknown as T & RecordModel });
+        })
+        .catch(() => {});
+    };
+
+    const eventName = `mock-${collection.replace(/s$/, '')}-updated`;
+    window.addEventListener(eventName, onMockUpdate);
+    return () => {
+      window.removeEventListener(eventName, onMockUpdate);
+    };
+  }
+
   let stopped = false;
   let unsubscribe: (() => Promise<void>) | undefined;
   void pb

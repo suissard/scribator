@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { pb } from '@/api/pocketbase';
 import { Button } from '@/components/ui/button';
 import { LogPanel } from './LogPanel';
+import { MockToggle } from './MockToggle';
 import { UsageBadge } from './UsageBadge';
 
 export function AppShell({ children, usageKey }: { children: ReactNode; usageKey?: unknown }) {
@@ -14,7 +15,8 @@ export function AppShell({ children, usageKey }: { children: ReactNode; usageKey
         <Link to="/" className="flex items-center gap-2 font-serif text-lg font-semibold">
           <Feather size={18} className="text-accent" /> Scribator
         </Link>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <MockToggle />
           <UsageBadge refreshKey={usageKey} />
           <Link to="/privacy" className="hidden text-xs text-muted hover:text-ink sm:inline">
             Confidentialité
