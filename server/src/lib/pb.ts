@@ -25,3 +25,12 @@ export function createUserClient(env: Env, token: string): PocketBase {
   pb.authStore.save(token, null);
   return pb;
 }
+
+/**
+ * Refus de PocketBase lié à la requête (jeton, droits, identifiant) : ce n'est pas une panne.
+ * Un statut 0 (réseau, délai) ou 5xx en est une, et ne doit pas se déguiser en 401 ou 404.
+ */
+export const isPbRejection = (e: unknown, statuses: number[]) =>
+  e instanceof ClientResponseError && statuses.includes(e.status);
+
+export const isPbOutage = (e: unknown) => e instanceof ClientResponseError && (e.status === 0 || e.status >= 500);

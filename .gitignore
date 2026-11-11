@@ -12,3 +12,4 @@ pocketbase/CHANGELOG.md
 pocketbase/LICENSE.md
 .DS_Store
 out/
+*.tsbuildinfo

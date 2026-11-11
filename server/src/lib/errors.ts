@@ -11,6 +11,8 @@ export const badRequest = (m: string) => new AppError(400, 'bad_request', m);
 export const forbidden = (m: string) => new AppError(403, 'forbidden', m);
 export const notFound = (m = 'Ressource introuvable.') => new AppError(404, 'not_found', m);
 export const conflict = (m: string) => new AppError(409, 'conflict', m);
+export const storageUnavailable = () =>
+  new AppError(503, 'storage_unavailable', 'La base de données ne répond pas. Réessaie dans un instant.');
 
 export class BudgetExceededError extends AppError {
   constructor(spent: number, budget: number) {
