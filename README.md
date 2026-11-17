@@ -32,17 +32,24 @@ Ouvre http://localhost:5173 et connecte-toi avec le compte de démonstration aff
 cp server/.env.example server/.env
 ```
 
-Renseigne `OPENROUTER_API_KEY`, les deux modèles (`AI_MODEL_CREATIVE` et `AI_MODEL_FAST`, voir [Choisir les modèles](#choisir-les-modèles)) et les identifiants superuser dans `server/.env`, crée ce superuser, puis lance :
+Renseigne `OPENROUTER_API_KEY`, les deux modèles (`AI_MODEL_CREATIVE` et `AI_MODEL_FAST`, voir [Choisir les modèles](#choisir-les-modèles)) et les identifiants superuser dans `server/.env` (et éventuellement `PB_USER_EMAIL` / `PB_USER_PASSWORD` pour créer un compte utilisateur admin dans l'application), initialise la base, puis lance :
 
 ```bash
-pocketbase/pocketbase superuser upsert admin@example.com ton-mot-de-passe --dir=pocketbase/pb_data --migrationsDir=pocketbase/pb_migrations
-```
-
-```bash
+npm run db:reset
 npm run dev
 ```
 
-Les comptes se créent dans l'interface d'administration de PocketBase (http://127.0.0.1:8090/_/) : il n'y a pas d'inscription publique. Le coût des appels IA se suit dans la collection `ai_calls`.
+Pour réinitialiser la base locale sans confirmation : `npm run db:reset -- --yes` (utilise `server/.env` et `.env`). Les comptes supplémentaires se créent dans l'interface d'administration de PocketBase (http://127.0.0.1:8090/_/) : il n'y a pas d'inscription publique. Le coût des appels IA se suit dans la collection `ai_calls`.
+
+### Lancer en local via Docker (sans conflit de port)
+
+Si le port `80` ou `8090` est déjà occupé sur la machine hôte, [docker-compose.local.yml](docker-compose.local.yml) fait tourner `pocketbase`, `server` et `caddy` sur un réseau Docker interne et publie uniquement l'entrée HTTP sur un port dynamique libre de `127.0.0.1` (surchargeable avec `APP_PORT`) :
+
+```bash
+npm run docker:up       # démarre et affiche l'URL dynamique
+npm run docker:reset    # remet à zéro la base Docker depuis server/.env / .env
+npm run docker:down     # arrête la pile locale
+```
 
 ## Choisir les modèles
 

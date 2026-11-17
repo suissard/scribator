@@ -1,0 +1,66 @@
+# Pile locale tout-en-un : PocketBase et le serveur Node tournent sur le réseau interne Docker,
+# sans exposer de port sur l'hôte (aucun conflit avec d'autres bases PocketBase).
+# Seul Caddy expose un port HTTP local, dynamique par défaut (APP_PORT=0).
+services:
+  pocketbase:
+    build: ./pocketbase
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+      - path: server/.env
+        required: false
+    volumes:
+      - pb_data_local:/pb/pb_data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8090/api/health || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+      - path: server/.env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      POCKETBASE_URL: http://pocketbase:8090
+      CORS_ORIGIN: "*"
+      LOG_DIR: /app/server/logs
+    volumes:
+      - server_logs_local:/app/server/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3001/api/health || exit 1"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  caddy:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      DOMAIN: ":80"
+    ports:
+      - "127.0.0.1:${APP_PORT:-0}:80"
+    volumes:
+      - caddy_data_local:/data
+
+volumes:
+  pb_data_local:
+  server_logs_local:
+  caddy_data_local:
