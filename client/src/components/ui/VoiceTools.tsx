@@ -34,20 +34,38 @@ function getSpeechRecognition(): (new () => SpeechRecognitionLike) | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+function joinSpoken(base: string, spoken: string): string {
+  const b = (base ?? '').trimEnd();
+  const t = spoken.trim();
+  if (!t) return base;
+  return b ? `${b} ${t}` : t;
+}
+
+/**
+ * Bouton de dictée : le texte reconnu est écrit en direct dans le champ
+ * (résultats provisoires compris), pour que la personne voie tout de suite
+ * que le micro fonctionne et que ce qui est écrit est correct.
+ */
 export function VoiceDictationButton({
-  onTranscript,
+  value,
+  onChange,
   label = 'Dicter avec ma voix',
   className,
 }: {
-  onTranscript(text: string): void;
+  value: string;
+  onChange(next: string): void;
   label?: string;
   className?: string;
 }) {
   const [listening, setListening] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
+  const [live, setLive] = useState('');
   const recRef = useRef<SpeechRecognitionLike | null>(null);
-  const callbackRef = useRef(onTranscript);
-  callbackRef.current = onTranscript;
+  const baseRef = useRef('');
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   useEffect(() => {
     return () => {
@@ -69,24 +87,33 @@ export function VoiceDictationButton({
     const rec = new Ctor();
     rec.lang = 'fr-FR';
     rec.continuous = true;
-    rec.interimResults = false;
+    rec.interimResults = true;
+    // Le texte déjà présent dans le champ est conservé ; la dictée s'ajoute après.
+    baseRef.current = valueRef.current;
     rec.onresult = (e) => {
-      let chunk = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i]?.isFinal) {
-          chunk += e.results[i]![0].transcript + ' ';
-        }
+      let finals = '';
+      let interim = '';
+      for (let i = 0; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (!r) continue;
+        if (r.isFinal) finals += r[0].transcript + ' ';
+        else interim += r[0].transcript + ' ';
       }
-      if (chunk.trim()) callbackRef.current(chunk.trim());
+      setLive(interim.trim());
+      onChangeRef.current(joinSpoken(baseRef.current, `${finals}${interim}`.replace(/\s+/g, ' ')));
     };
-    rec.onerror = () => setListening(false);
-    rec.onend = () => setListening(false);
+    const finish = () => {
+      setListening(false);
+      setLive('');
+    };
+    rec.onerror = finish;
+    rec.onend = finish;
     recRef.current = rec;
     try {
       rec.start();
       setListening(true);
     } catch {
-      setListening(false);
+      finish();
     }
   };
 
@@ -98,13 +125,13 @@ export function VoiceDictationButton({
         onClick={toggle}
         className={cn(
           'h-12 px-5 text-base font-semibold shadow-xs',
-          listening && 'bg-danger text-white hover:bg-danger/90 animate-pulse',
+          listening && 'bg-danger text-white hover:bg-danger/90',
           className,
         )}
       >
         {listening ? (
           <>
-            <MicOff size={20} /> Arrêter la dictée (parlez maintenant…)
+            <MicOff size={20} /> Arrêter la dictée
           </>
         ) : (
           <>
@@ -112,6 +139,18 @@ export function VoiceDictationButton({
           </>
         )}
       </Button>
+      {listening && (
+        <span role="status" aria-live="polite" className="flex items-center gap-2 text-sm text-muted">
+          <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-danger" aria-hidden />
+          {live ? (
+            <span>
+              J'entends : <em className="text-ink">« {live} »</em>
+            </span>
+          ) : (
+            'Je vous écoute, parlez maintenant… Le texte s’écrit dans le champ au fur et à mesure.'
+          )}
+        </span>
+      )}
       {unsupported && (
         <span className="text-xs text-danger">
           La dictée vocale n'est pas disponible sur ce navigateur (utilisez Chrome, Edge ou Safari).

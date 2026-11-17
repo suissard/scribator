@@ -22,7 +22,7 @@ import { ErrorNote } from '@/components/ui/ErrorNote';
 import { Input, Textarea } from '@/components/ui/field';
 import { SpeakButton, VoiceDictationButton } from '@/components/ui/VoiceTools';
 import { flushAllAutosaves } from '@/lib/autosaveRegistry';
-import type { Chapter, LengthPreset, Project, Scene } from '@/lib/types';
+import type { Chapter, Project, Scene } from '@/lib/types';
 import { useAction } from '@/lib/useAction';
 import { useAutoSave } from '@/lib/useAutoSave';
 import { cn } from '@/lib/utils';
@@ -38,15 +38,13 @@ const SIMPLE_STEPS: Array<{ view: StepView; label: string }> = [
   { view: 5, label: '5. Mon livre' },
 ];
 
-const SIMPLE_LENGTHS: Array<{ id: LengthPreset; label: string; desc: string; chapters: number; words: number }> = [
-  { id: 'NOVELLA', label: 'Récit court', desc: '6 chapitres', chapters: 6, words: 2500 },
-  { id: 'ROMAN', label: 'Roman classique', desc: '12 chapitres', chapters: 12, words: 3000 },
-  { id: 'ROMAN_LONG', label: 'Grand roman', desc: '20 chapitres', chapters: 20, words: 3500 },
-];
+const DEFAULT_CHAPTERS = 5;
+const MIN_CHAPTERS = 1;
+const MAX_CHAPTERS = 60;
 
-function appendSpoken(current: string, spoken: string): string {
-  const base = current.trim();
-  return base ? `${base} ${spoken}` : spoken;
+function clampChapters(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_CHAPTERS;
+  return Math.min(MAX_CHAPTERS, Math.max(MIN_CHAPTERS, Math.round(n)));
 }
 
 function SimpleStepper({ status, active, onSelect }: { status: Project['status']; active: StepView; onSelect(s: StepView): void }) {
@@ -88,13 +86,13 @@ function SimpleStep1({ project }: { project: Project }) {
   const job = useProjectStore((s) => s.activeJob);
   const setProject = useProjectStore((s) => s.setProject);
   const [form, setForm] = useState(() => ({
-    title: project.title,
+    title: project.title ?? '',
     language: project.language || 'fr',
     genre: project.genre,
     length_preset: project.length_preset || 'ROMAN',
-    target_chapter_count: project.target_chapter_count || 12,
+    target_chapter_count: project.target_chapter_count || DEFAULT_CHAPTERS,
     target_words_per_chapter: project.target_words_per_chapter || 3000,
-    raw_ideas: project.raw_ideas,
+    raw_ideas: project.raw_ideas ?? '',
   }));
   const [uploaded, setUploaded] = useState(
     project.reference_file ? 'Votre ancien livre est bien enregistré' : project.reference_meta ? 'Le style de votre ancien livre a été mémorisé' : '',
@@ -107,6 +105,12 @@ function SimpleStep1({ project }: { project: Project }) {
     const next = { ...form, ...patch };
     setForm(next);
     save(next);
+  };
+
+  const [chaptersInput, setChaptersInput] = useState(String(form.target_chapter_count));
+  const setChapters = (n: number) => {
+    setChaptersInput(String(n));
+    if (n !== form.target_chapter_count || form.length_preset !== 'CUSTOM') update({ length_preset: 'CUSTOM', target_chapter_count: n });
   };
 
   const onFile = (file: File | undefined) => {
@@ -139,7 +143,8 @@ function SimpleStep1({ project }: { project: Project }) {
         />
         <VoiceDictationButton
           label="Dicter le titre au micro"
-          onTranscript={(spoken) => update({ title: appendSpoken(form.title, spoken) })}
+          value={form.title}
+          onChange={(next) => update({ title: next })}
         />
       </Card>
 
@@ -179,7 +184,8 @@ function SimpleStep1({ project }: { project: Project }) {
         <div className="flex flex-wrap gap-3">
           <VoiceDictationButton
             label="Parler dans le micro pour raconter l'histoire"
-            onTranscript={(spoken) => update({ raw_ideas: appendSpoken(form.raw_ideas, spoken) })}
+            value={form.raw_ideas}
+            onChange={(next) => update({ raw_ideas: next })}
           />
           {form.raw_ideas.trim() && <SpeakButton text={form.raw_ideas} label="Relire mes idées à voix haute" />}
         </div>
@@ -193,26 +199,51 @@ function SimpleStep1({ project }: { project: Project }) {
       </Card>
 
       <Card className="space-y-4 p-6">
-        <h2 className="font-serif text-xl font-bold">Longueur souhaitée pour ce livre</h2>
-        <div className="grid gap-3 sm:grid-cols-3">
-          {SIMPLE_LENGTHS.map((p) => {
-            const selected = form.target_chapter_count === p.chapters;
-            return (
-              <button
-                key={p.id}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => update({ length_preset: p.id, target_chapter_count: p.chapters, target_words_per_chapter: p.words })}
-                className={cn(
-                  'cursor-pointer rounded-xl border-2 p-4 text-left transition-colors',
-                  selected ? 'border-accent bg-accent-soft' : 'border-line bg-card hover:bg-accent-soft/40',
-                )}
-              >
-                <span className="block text-lg font-semibold">{p.label}</span>
-                <span className="block text-sm text-muted">{p.desc}</span>
-              </button>
-            );
-          })}
+        <h2 className="font-serif text-xl font-bold">Combien de chapitres pour ce livre ?</h2>
+        <p className="text-base text-muted">
+          Indiquez le nombre de chapitres souhaité (entre {MIN_CHAPTERS} et {MAX_CHAPTERS}). Par défaut : {DEFAULT_CHAPTERS} chapitres.
+        </p>
+        <div className="flex items-center gap-3">
+          <Button
+            type="button"
+            variant="secondary"
+            aria-label="Un chapitre de moins"
+            className="h-14 w-14 text-2xl font-bold"
+            disabled={chaptersInput !== '' && Number(chaptersInput) <= MIN_CHAPTERS}
+            onClick={() => setChapters(clampChapters((Number(chaptersInput) || DEFAULT_CHAPTERS) - 1))}
+          >
+            −
+          </Button>
+          <Input
+            aria-label="Nombre de chapitres"
+            type="number"
+            inputMode="numeric"
+            min={MIN_CHAPTERS}
+            max={MAX_CHAPTERS}
+            step={1}
+            className="h-14 w-28 text-center text-2xl font-bold"
+            value={chaptersInput}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setChaptersInput(raw);
+              const n = Number(raw);
+              if (raw !== '' && Number.isInteger(n) && n >= MIN_CHAPTERS && n <= MAX_CHAPTERS) {
+                update({ length_preset: 'CUSTOM', target_chapter_count: n });
+              }
+            }}
+            onBlur={() => setChapters(clampChapters(chaptersInput === '' ? DEFAULT_CHAPTERS : Number(chaptersInput)))}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            aria-label="Un chapitre de plus"
+            className="h-14 w-14 text-2xl font-bold"
+            disabled={Number(chaptersInput) >= MAX_CHAPTERS}
+            onClick={() => setChapters(clampChapters((Number(chaptersInput) || DEFAULT_CHAPTERS) + 1))}
+          >
+            +
+          </Button>
+          <span className="text-lg">chapitres</span>
         </div>
       </Card>
 
@@ -297,7 +328,8 @@ function SimpleStep2({ project }: { project: Project }) {
         </p>
         <VoiceDictationButton
           label="Dicter ma demande au micro"
-          onTranscript={(spoken) => setFeedback((prev) => appendSpoken(prev, spoken))}
+          value={feedback}
+          onChange={setFeedback}
         />
         <Textarea
           aria-label="Vos consignes pour modifier le résumé"
@@ -360,7 +392,8 @@ function SimpleChapterItem({ chapter }: { chapter: Chapter }) {
         <span className="font-serif text-xl font-bold text-accent">Chapitre {chapter.chapter_number}</span>
         <VoiceDictationButton
           label="Dicter la suite de ce chapitre"
-          onTranscript={(spoken) => update({ brief_summary: appendSpoken(form.brief_summary, spoken) })}
+          value={form.brief_summary}
+          onChange={(next) => update({ brief_summary: next })}
         />
       </div>
       <Input
@@ -410,7 +443,8 @@ function SimpleStep3({ project }: { project: Project }) {
         <h2 className="font-serif text-xl font-bold">Demander une modification du plan</h2>
         <VoiceDictationButton
           label="Dicter ma demande au micro"
-          onTranscript={(spoken) => setFeedback((prev) => appendSpoken(prev, spoken))}
+          value={feedback}
+          onChange={setFeedback}
         />
         <Textarea
           aria-label="Consignes pour modifier le plan"
@@ -735,7 +769,8 @@ function SimpleStep5Book({ project }: { project: Project }) {
                 </p>
                 <VoiceDictationButton
                   label="Dicter mes consignes pour ce chapitre"
-                  onTranscript={(spoken) => setDictatedChange((prev) => appendSpoken(prev, spoken))}
+                  value={dictatedChange}
+                  onChange={setDictatedChange}
                 />
                 <Textarea
                   aria-label="Consignes pour réécrire ce chapitre"

@@ -39,7 +39,7 @@ export function Dashboard() {
     e.preventDefault();
     void run(async () => {
       const p = await pb.collection('projects').create({
-        user: pb.authStore.record?.id, title, language: 'fr', length_preset: 'ROMAN', target_chapter_count: 12, target_words_per_chapter: 3000,
+        user: pb.authStore.record?.id, title, language: 'fr', length_preset: 'ROMAN', target_chapter_count: 5, target_words_per_chapter: 3000,
       });
       navigate(`/projects/${p.id}`);
     });
@@ -95,7 +95,8 @@ export function Dashboard() {
           {isSimple && (
             <VoiceDictationButton
               label="Dicter le titre au micro"
-              onTranscript={(spoken) => setTitle((prev) => (prev.trim() ? `${prev.trim()} ${spoken}` : spoken))}
+              value={title}
+              onChange={setTitle}
             />
           )}
           <div className="flex justify-end pt-2">

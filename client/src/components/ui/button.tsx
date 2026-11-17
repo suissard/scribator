@@ -27,17 +27,25 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<ty
 }
 
 export function Button({ className, variant, size, asChild, type, loading, children, disabled, ...props }: Props) {
-  const Comp = asChild ? Slot : 'button';
+  const classes = cn(variants({ variant, size }), className);
+  if (asChild) {
+    // Slot exige un unique enfant : aucun nœud supplémentaire (même `false`) ne doit lui être passé.
+    return (
+      <Slot className={classes} aria-busy={loading || undefined} {...props}>
+        {children}
+      </Slot>
+    );
+  }
   return (
-    <Comp
-      type={asChild ? undefined : (type ?? 'button')}
-      className={cn(variants({ variant, size }), className)}
+    <button
+      type={type ?? 'button'}
+      className={classes}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       {...props}
     >
-      {loading && !asChild && <Spinner size={14} />}
+      {loading && <Spinner size={14} />}
       {children}
-    </Comp>
+    </button>
   );
 }

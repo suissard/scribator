@@ -22,7 +22,7 @@ export function Step1Input({ project }: { project: Project }) {
   const [form, setForm] = useState(() => ({
     title: project.title, language: project.language || 'fr', genre: project.genre, audience: project.audience,
     length_preset: project.length_preset || 'ROMAN',
-    target_chapter_count: project.target_chapter_count || 20,
+    target_chapter_count: project.target_chapter_count || 5,
     target_words_per_chapter: project.target_words_per_chapter || 3500,
     raw_ideas: project.raw_ideas,
   }));
