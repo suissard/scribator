@@ -9,9 +9,15 @@ deps.jobs.startWatchdog();
 
 await app.listen({ port: env.PORT, host: env.HOST });
 
+let stopping = false;
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
-    deps.jobs.stopWatchdog();
-    void app.close().then(() => process.exit(0));
+    if (stopping) process.exit(1); // second signal : on n'attend plus
+    stopping = true;
+    void deps.jobs
+      .shutdown()
+      .catch((e: unknown) => app.log.error({ err: e }, "échec de l'arrêt des jobs"))
+      .then(() => app.close())
+      .then(() => process.exit(0));
   });
 }

@@ -102,7 +102,8 @@ const realApi = {
     a.href = url;
     a.download = name;
     a.click();
-    URL.revokeObjectURL(url);
+    // Révoquer tout de suite peut annuler le téléchargement (Firefox, Safari).
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   },
 };
 
