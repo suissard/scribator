@@ -13,8 +13,10 @@ export const mockApi = {
     return { default_model: MOCK_MODELS[0].id, models: MOCK_MODELS };
   },
 
-  setModel: async (_id: string, _model: string): Promise<unknown> => {
-    return { ok: true };
+  setModel: async (id: string, model: string): Promise<unknown> => {
+    await mockPb.collection('projects').update(id, { model_creative: model });
+    window.dispatchEvent(new CustomEvent('mock-project-updated', { detail: { id } }));
+    return { model_creative: model };
   },
 
   analyze: async (id: string, _feedback?: string): Promise<{ jobId: string }> => {
@@ -69,7 +71,39 @@ export const mockApi = {
     return { ok: true };
   },
 
-  writeAll: async (_id: string): Promise<{ jobId: string }> => {
+  writeAll: async (id: string): Promise<{ jobId: string }> => {
+    setTimeout(async () => {
+      const chapters = (await mockPb.collection('chapters').getFullList()) as Chapter[];
+      const scenes = (await mockPb.collection('scenes').getFullList()) as Scene[];
+      for (const chap of chapters.filter((c) => c.project === id && c.status !== 'APPROVED')) {
+        const chapScenes = scenes.filter((s) => s.chapter === chap.id);
+        if (chapScenes.length === 0) {
+          await mockPb.collection('scenes').create({
+            chapter: chap.id,
+            scene_number: 1,
+            beat: chap.brief_summary || 'Scène principale du chapitre',
+            target_words: chap.target_words || 1500,
+            content: 'Contenu rédigé automatiquement en mode Mock.',
+            status: 'APPROVED',
+          });
+        } else {
+          for (const sc of chapScenes) {
+            await mockPb.collection('scenes').update(sc.id, {
+              content: sc.content || 'Contenu rédigé automatiquement en mode Mock.',
+              status: 'APPROVED',
+            });
+          }
+        }
+        await mockPb.collection('chapters').update(chap.id, {
+          status: 'APPROVED',
+          post_writing_summary: chap.post_writing_summary || 'Résumé automatique du chapitre (Mock).',
+          stale_reason: '',
+        });
+        window.dispatchEvent(new CustomEvent('mock-chapter-updated', { detail: { id: chap.id } }));
+      }
+      await mockPb.collection('projects').update(id, { status: 'COMPLETED' });
+      window.dispatchEvent(new CustomEvent('mock-project-updated', { detail: { id } }));
+    }, 1500);
     return { jobId: 'job-mock-write-all' };
   },
 
@@ -110,7 +144,14 @@ export const mockApi = {
     return { ok: true };
   },
 
-  reorder: async (_projectId: string, _orderedIds: string[]): Promise<unknown> => {
+  reorder: async (projectId: string, orderedIds: string[]): Promise<unknown> => {
+    const chapters = (await mockPb.collection('chapters').getFullList()) as Chapter[];
+    const sorted = chapters.filter((c) => c.project === projectId).sort((a, b) => a.chapter_number - b.chapter_number);
+    const queue = [...orderedIds];
+    const nextIds = sorted.map((c) => (c.status === 'PENDING' ? (queue.shift() ?? c.id) : c.id));
+    for (const [index, chapId] of nextIds.entries()) {
+      await mockPb.collection('chapters').update(chapId, { chapter_number: index + 1 });
+    }
     return { ok: true };
   },
 
@@ -146,7 +187,19 @@ export const mockApi = {
     return { jobId: 'job-mock-write' };
   },
 
-  rewriteChapter: async (_chapterId: string): Promise<{ jobId: string }> => {
+  rewriteChapter: async (chapterId: string): Promise<{ jobId: string }> => {
+    setTimeout(async () => {
+      const scenes = (await mockPb.collection('scenes').getFullList()) as Scene[];
+      for (const sc of scenes.filter((s) => s.chapter === chapterId)) {
+        await mockPb.collection('scenes').update(sc.id, {
+          content: 'Nouvelle version réécrite du chapitre en mode Mock.',
+          status: 'REVIEW',
+        });
+        window.dispatchEvent(new CustomEvent('mock-scene-updated', { detail: { id: sc.id } }));
+      }
+      await mockPb.collection('chapters').update(chapterId, { status: 'REVIEW' });
+      window.dispatchEvent(new CustomEvent('mock-chapter-updated', { detail: { id: chapterId } }));
+    }, 1500);
     return { jobId: 'job-mock-rewrite' };
   },
 
@@ -162,12 +215,18 @@ export const mockApi = {
     return { ok: true };
   },
 
-  refreshMemory: async (_chapterId: string): Promise<unknown> => {
+  refreshMemory: async (chapterId: string): Promise<unknown> => {
+    await mockPb.collection('chapters').update(chapterId, {
+      status: 'APPROVED',
+      post_writing_summary: 'Mémoire recalculée (Mock).',
+      stale_reason: '',
+    });
+    window.dispatchEvent(new CustomEvent('mock-chapter-updated', { detail: { id: chapterId } }));
     return { ok: true };
   },
 
   ignoreStale: async (chapterId: string): Promise<unknown> => {
-    await mockPb.collection('chapters').update(chapterId, { stale_reason: '' });
+    await mockPb.collection('chapters').update(chapterId, { status: 'APPROVED', stale_reason: '' });
     window.dispatchEvent(new CustomEvent('mock-chapter-updated', { detail: { id: chapterId } }));
     return { ok: true };
   },

@@ -1,5 +1,11 @@
 const MOCK_STORAGE_KEY = 'scribator_mock_mode';
 
+export function isMockAvailable(): boolean {
+  if (import.meta.env.DEV || import.meta.env.VITE_DEFAULT_MOCK === 'true') return true;
+  if (typeof window !== 'undefined' && window.location.hostname.endsWith('github.io')) return true;
+  return false;
+}
+
 function getInitialMockMode(): boolean {
   const stored = localStorage.getItem(MOCK_STORAGE_KEY);
   if (stored !== null) {

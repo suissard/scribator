@@ -1,10 +1,11 @@
 import { Database, Sparkles } from 'lucide-react';
 import { useSyncExternalStore } from 'react';
 import { Button } from '@/components/ui/button';
-import { getMockMode, setMockMode, subscribeMockMode } from '@/lib/mockState';
+import { getMockMode, isMockAvailable, setMockMode, subscribeMockMode } from '@/lib/mockState';
 
 export function MockToggle() {
   const isMock = useSyncExternalStore(subscribeMockMode, getMockMode);
+  if (!isMockAvailable() && !isMock) return null;
 
   const toggle = () => {
     const next = !isMock;

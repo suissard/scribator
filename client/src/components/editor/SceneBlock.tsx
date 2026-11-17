@@ -57,10 +57,14 @@ export function SceneBlock({ scene, locked }: { scene: Scene; locked: boolean })
         </Field>
       )}
       {scene.status === 'GENERATING' && <StreamingViewer text={scene.draft} />}
-      {scene.status === 'REVIEW' && (
-        <RichTextEditor value={scene.content} onChange={saveContent} ariaLabel={`Texte de la scène ${scene.scene_number}`} />
+      {(scene.status === 'REVIEW' || scene.status === 'APPROVED') && (
+        <RichTextEditor
+          value={scene.content}
+          onChange={scene.status === 'REVIEW' ? saveContent : undefined}
+          readOnly={scene.status === 'APPROVED'}
+          ariaLabel={`Texte de la scène ${scene.scene_number}`}
+        />
       )}
-      {scene.status === 'APPROVED' && <div className="prose-book whitespace-pre-wrap">{scene.content}</div>}
 
       <ErrorNote error={error} />
       {scene.status !== 'PENDING' && scene.status !== 'GENERATING' && (

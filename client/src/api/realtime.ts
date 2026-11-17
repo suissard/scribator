@@ -46,6 +46,7 @@ export function subscribe<T>(collection: string, filter: string, handler: Handle
 /**
  * Filtre anti-écho (§6) : tout ce que ce client a envoyé récemment est mémorisé. L'événement Realtime
  * qui renvoie une ancienne frappe ne doit ni écraser une frappe plus récente ni faire sauter le curseur.
+ * Dès qu'un écho est reçu, lui et les frappes antérieures sont purgés pour ne pas bloquer une restauration ultérieure.
  */
 export function createEchoGuard(max = 50) {
   const recent: string[] = [];
@@ -54,6 +55,11 @@ export function createEchoGuard(max = 50) {
       recent.push(value);
       if (recent.length > max) recent.shift();
     },
-    isEcho: (incoming: string) => recent.includes(incoming),
+    isEcho(incoming: string) {
+      const index = recent.indexOf(incoming);
+      if (index === -1) return false;
+      recent.splice(0, index + 1);
+      return true;
+    },
   };
 }

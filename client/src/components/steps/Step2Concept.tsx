@@ -1,5 +1,5 @@
 import { ArrowRight, History, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { pb } from '@/api/pocketbase';
 import { api } from '@/api/server';
 import { RichTextEditor } from '@/components/editor/RichTextEditor';
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { Field, Input, Textarea } from '@/components/ui/field';
-import { flushAllAutosaves } from '@/lib/autosaveRegistry';
+import { flushAllAutosaves, registerFlush } from '@/lib/autosaveRegistry';
 import { STATUS_ORDER, type Project, type StoryBible, type StyleMatrix } from '@/lib/types';
 import { useAction } from '@/lib/useAction';
 import { useAutoSave } from '@/lib/useAutoSave';
@@ -21,12 +21,29 @@ const STYLE_LISTS: Array<[keyof StyleMatrix, string]> = [
   ['stylistic_rules', 'Règles stylistiques'], ['forbidden_tropes', 'Tropes interdits'], ['forbidden_phrases', 'Expressions interdites'],
 ];
 
+function cleanStyle(style: StyleMatrix): StyleMatrix {
+  return {
+    ...style,
+    ...Object.fromEntries(STYLE_LISTS.map(([k]) => [k, (style[k] as string[]).map((s) => s.trim()).filter(Boolean)])),
+  } as StyleMatrix;
+}
+
 function StyleEditor({ project }: { project: Project }) {
   const [style, setStyle] = useState(project.style_matrix!);
   const [history, setHistory] = useState(false);
   const { busy, error, run } = useAction();
   useEffect(() => setStyle(project.style_matrix!), [project.style_matrix]);
   const dirty = JSON.stringify(style) !== JSON.stringify(project.style_matrix);
+  const latest = useRef({ dirty, style });
+  latest.current = { dirty, style };
+
+  useEffect(() => {
+    return registerFlush(async () => {
+      if (!latest.current.dirty) return;
+      await api.patchStyle(project.id, cleanStyle(latest.current.style));
+    });
+  }, [project.id]);
+
   return (
     <Card className="space-y-4">
       <div className="flex items-center justify-between">
@@ -52,14 +69,7 @@ function StyleEditor({ project }: { project: Project }) {
       <Button
         variant="secondary"
         disabled={!dirty || busy}
-        onClick={() =>
-          void run(() =>
-            api.patchStyle(project.id, {
-              ...style,
-              ...Object.fromEntries(STYLE_LISTS.map(([k]) => [k, (style[k] as string[]).map((s) => s.trim()).filter(Boolean)])),
-            }),
-          )
-        }
+        onClick={() => void run(() => api.patchStyle(project.id, cleanStyle(style)))}
       >
         Enregistrer le style
       </Button>
@@ -76,6 +86,15 @@ function BibleEditor({ project }: { project: Project }) {
   const { busy, error, run } = useAction();
   useEffect(() => setBible(project.story_bible!), [project.story_bible]);
   const dirty = JSON.stringify(bible) !== JSON.stringify(project.story_bible);
+  const latest = useRef({ dirty, bible });
+  latest.current = { dirty, bible };
+
+  useEffect(() => {
+    return registerFlush(async () => {
+      if (!latest.current.dirty) return;
+      await api.patchBible(project.id, latest.current.bible);
+    });
+  }, [project.id]);
 
   function patch<K extends keyof StoryBible>(key: K, index: number, change: Partial<StoryBible[K][number]>) {
     setBible({ ...bible, [key]: bible[key].map((item, i) => (i === index ? { ...item, ...change } : item)) });
