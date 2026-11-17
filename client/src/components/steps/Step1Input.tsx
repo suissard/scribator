@@ -124,12 +124,14 @@ export function Step1Input({ project }: { project: Project }) {
 
       <Card className="space-y-4">
         <div>
-          <h2 className="font-semibold">Ouvrage de référence (facultatif)</h2>
-          <p className="mt-1 text-sm text-muted">Sans ouvrage, l'IA propose un style à partir de tes idées. Tu pourras le modifier à l'étape suivante.</p>
+          <h2 className="font-semibold">Ouvrage de référence ou Tome précédent (facultatif)</h2>
+          <p className="mt-1 text-sm text-muted">
+            Dépose un livre (PDF, DOCX, EPUB ou TXT) : l'IA en extrait le style d'écriture ainsi que l'histoire, la situation finale et les personnages pour préparer la suite. Sans ouvrage, l'IA propose un style à partir de tes idées.
+          </p>
         </div>
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" className="mt-0.5 accent-[var(--color-accent)]" checked={terms} disabled={terms} onChange={(e) => acceptTerms(e.target.checked)} />
-          <span>Je certifie disposer des droits nécessaires sur le fichier de référence, utilisé uniquement pour l'analyse de style puis supprimé.</span>
+          <span>Je certifie disposer des droits nécessaires sur le fichier de référence, utilisé uniquement pour l'analyse puis supprimé.</span>
         </label>
         <label className={cn('flex flex-col items-center gap-2 rounded-md border-2 border-dashed border-line p-6 text-center', terms ? 'cursor-pointer hover:bg-accent-soft/40' : 'opacity-50')}>
           <FileUp className="text-muted" />
@@ -137,9 +139,17 @@ export function Step1Input({ project }: { project: Project }) {
           <input type="file" className="sr-only" disabled={!terms || busy} accept=".pdf,.docx,.epub,.txt" onChange={(e) => onFile(e.target.files?.[0])} />
         </label>
         {project.reference_meta && (
-          <p className="text-xs text-muted">
-            Déjà analysé : {formatNumber(project.reference_meta.word_count)} mots. Le fichier a été supprimé.
-          </p>
+          <div className="space-y-1 rounded-md bg-paper p-3 text-xs text-muted">
+            <p>
+              Déjà analysé : {formatNumber(project.reference_meta.word_count)} mots. Le fichier source a été supprimé après extraction.
+            </p>
+            {project.reference_meta.story_memory && (
+              <p>
+                <strong>Personnages retrouvés :</strong>{' '}
+                {project.reference_meta.story_memory.characters.map((c) => c.name).join(', ') || 'aucun'}
+              </p>
+            )}
+          </div>
         )}
       </Card>
 

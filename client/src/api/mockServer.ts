@@ -24,7 +24,32 @@ export const mockApi = {
       await mockPb.collection('projects').update(id, {
         status: 'STEP_2_CONCEPT_REVIEW',
         reformulated_concept:
-          'Concept analysé (Mock) : Une histoire prenante au cœur d\'un monde mystérieux où chaque décision a des conséquences imprévisibles.',
+          'Concept analysé (Mock) : Dans la continuité du premier ouvrage, les personnages principaux affrontent un nouveau tournant décisif.',
+        reference_meta: {
+          filename: 'ancien_livre.pdf',
+          word_count: 42000,
+          language: 'fr',
+          analyzed_at: new Date().toISOString(),
+          story_memory: {
+            summary: 'Dans le premier livre, Élise et son frère Paul ont reconstruit le domaine familial après la tempête.',
+            ending_state: 'Une lettre retrouvée dans le grenier révèle qu’un héritier disparu vit encore en Bretagne.',
+            characters: [
+              { name: 'Élise', role: 'principal', traits: 'déterminée, attachée à sa terre', current_status: 'propriétaire du domaine' },
+              { name: 'Paul', role: 'secondaire', traits: 'prudent, mémoire du village', current_status: 'prépare le voyage' },
+            ],
+            locations: [{ name: 'Le domaine des Ormes', description: 'grande bâtisse entourée de pins' }],
+            world_rules: [],
+          },
+        },
+        story_bible: {
+          characters: [
+            { id: 'char_1', name: 'Élise', role: 'principal', traits: 'déterminée, attachée à sa terre', current_status: 'part à la recherche de la vérité' },
+            { id: 'char_2', name: 'Paul', role: 'secondaire', traits: 'prudent, mémoire du village', current_status: 'accompagne sa sœur' },
+          ],
+          locations: [{ id: 'loc_1', name: 'Le domaine des Ormes', description: 'grande bâtisse entourée de pins' }],
+          world_rules: [],
+          timeline_events: [{ id: 'evt_1', chapter_number: 0, event: 'Découverte de la lettre dans le grenier à la fin du premier livre' }],
+        },
         style_matrix: {
           tone: 'Atmosphérique et immersif',
           pacing: 'Progressif',

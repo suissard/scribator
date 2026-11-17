@@ -10,13 +10,13 @@ import { parseArgs } from 'node:util';
 import { loadAiEnv } from '../src/config/env.js';
 import { loadPrompt, renderTemplate } from '../src/lib/prompts.js';
 import { bibleWithIds, toStyleSuggestion } from '../src/services/bible.service.js';
-import { buildSampleContext, buildSceneContext, formatBibleWithIds, formatStyleMatrix, type ProjectContext, type TextBlock } from '../src/services/context.service.js';
+import { buildSampleContext, buildSceneContext, formatBibleWithIds, formatReferenceMemory, formatStyleMatrix, type ProjectContext, type TextBlock } from '../src/services/context.service.js';
 import { LlmService, type AiCallEntry, type CallContext, type Purpose } from '../src/services/llm.service.js';
 import { computeDiff } from '../src/services/memory.service.js';
 import { ModelCatalog } from '../src/services/models.service.js';
 import { defaultSceneCount, normalizeScenePlan } from '../src/services/outline.service.js';
 import { countWords, parseReference } from '../src/services/parser.service.js';
-import { AiConceptSchema, AiOutlineSchema, AiScenePlanSchema, AiStyleLearningSchema, StyleMatrixSchema } from '../src/types.js';
+import { AiConceptSchema, AiOutlineSchema, AiReferenceExtractSchema, AiScenePlanSchema, AiStyleLearningSchema, StyleMatrixSchema, type ReferenceMemory } from '../src/types.js';
 import type { z } from 'zod';
 
 const { values } = parseArgs({
@@ -61,29 +61,40 @@ const write = async (purpose: Purpose, system: TextBlock[], user: string) =>
     system, user, maxTokens: 16000, onText: () => {},
   })).text;
 
-console.log('1. Style');
+console.log('1. Style et mémoire du livre de référence');
 const rawIdeas = readFileSync(values.ideas, 'utf8');
 const language = values.language!;
 let style;
+let refMemory: ReferenceMemory | undefined;
 if (values.ref) {
   const parsed = await parseReference(readFileSync(values.ref));
   console.log(`  ${parsed.wordCount} mots, langue ${parsed.language}`);
-  style = await structured('style_extract', env.AI_MODEL_FAST, renderTemplate(loadPrompt('style_extract').text, {
+  const excerpts = [
+    `## Début du livre\n\n${parsed.opening}`,
+    ...parsed.segments.map((s, i) => `## Extrait central ${i + 1}\n\n${s}`),
+    `## Fin du livre\n\n${parsed.ending}`,
+  ].join('\n\n');
+  const extracted = await structured('style_extract', env.AI_MODEL_FAST, renderTemplate(loadPrompt('style_extract').text, {
     language,
-    segments: parsed.segments.map((s, i) => `## Extrait ${i + 1}\n\n${s}`).join('\n\n'),
-  }), StyleMatrixSchema);
+    segments: excerpts,
+  }), AiReferenceExtractSchema);
+  const { story_memory, ...extractedStyle } = extracted;
+  style = StyleMatrixSchema.parse(extractedStyle);
+  refMemory = story_memory;
 } else {
   style = await structured('style_extract', env.AI_MODEL_CREATIVE, renderTemplate(loadPrompt('style_invent').text, {
     language, genre: values.genre!, audience: values.audience!, raw_ideas: rawIdeas,
   }), StyleMatrixSchema);
 }
-save('1-style.md', formatStyleMatrix(style));
+save('1-style.md', formatStyleMatrix(style) + (refMemory ? `\n\n# Mémoire extraite du livre\n\n${formatReferenceMemory(refMemory)}` : ''));
 
 console.log('2. Concept et Bible');
 const concept = await structured('concept', env.AI_MODEL_CREATIVE, renderTemplate(loadPrompt('concept').text, {
   language: values.language!, genre: values.genre!, audience: values.audience!,
   target_chapter_count: values.chapters!, target_words_per_chapter: values.words!,
-  raw_ideas: rawIdeas, style_matrix: formatStyleMatrix(style), feedback: '',
+  raw_ideas: rawIdeas,
+  reference_story: refMemory ? `\n\n## Livre précédent fourni par l'auteur\n\n${formatReferenceMemory(refMemory)}` : '',
+  style_matrix: formatStyleMatrix(style), feedback: '',
 }), AiConceptSchema);
 const bible = bibleWithIds(concept.story_bible);
 save('2-concept.md', `${concept.reformulated_concept}\n\n# Bible\n\n${formatBibleWithIds(bible)}`);

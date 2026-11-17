@@ -32,6 +32,11 @@ describe('nettoyage', () => {
   it("n'ôte pas une phrase qui parle de droits", () => {
     expect(cleanText({ pages: ['Il réclamait ses droits devant le juge.'], paged: false })).toContain('réclamait');
   });
+
+  it('recolle les mots coupés par une césure en fin de ligne dans un PDF paginé', () => {
+    const text = cleanText({ pages: ['Elle gardait un souve-\nnir très précis de cet événe-\nment.'], paged: true });
+    expect(text).toContain('souvenir très précis de cet événement.');
+  });
 });
 
 describe('échantillonnage', () => {
@@ -98,6 +103,8 @@ describe('formats', () => {
     const page = (_: unknown, p: number) => Array.from({ length: 400 }, (_, i) => `m${letters(p * 400 + i)}`).join(' ');
     const parsed = await parseReference(await pdf(Array.from({ length: 12 }, page)));
     expect(parsed.wordCount).toBeGreaterThan(3000);
+    expect(parsed.opening).toBeTruthy();
+    expect(parsed.ending).toBeTruthy();
   });
 
   it('détecte un PDF probablement scanné', async () => {

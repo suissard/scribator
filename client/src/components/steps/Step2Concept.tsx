@@ -194,6 +194,17 @@ export function Step2Concept({ project }: { project: Project }) {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4 sm:p-6">
+      {project.reference_meta?.story_memory && (
+        <Card className="space-y-2 border-accent/30 bg-accent-soft/30">
+          <h2 className="font-semibold">Mémoire extraite de l'ouvrage fourni</h2>
+          <p className="text-sm text-muted">{project.reference_meta.story_memory.summary}</p>
+          {project.reference_meta.story_memory.ending_state && (
+            <p className="text-sm">
+              <strong>Situation à la fin du livre fourni :</strong> {project.reference_meta.story_memory.ending_state}
+            </p>
+          )}
+        </Card>
+      )}
       <Card className="space-y-3">
         <h2 className="font-semibold">Concept</h2>
         <RichTextEditor value={project.reformulated_concept} onChange={save} ariaLabel="Concept du livre" />

@@ -8,20 +8,23 @@ import { Badge, Card } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { Field, Input } from '@/components/ui/field';
+import { VoiceDictationButton } from '@/components/ui/VoiceTools';
 import type { Project, ProjectStatus } from '@/lib/types';
+import { useUiMode } from '@/lib/uiMode';
 import { useAction } from '@/lib/useAction';
 
 const LABELS: Record<ProjectStatus, string> = {
-  STEP_1_INPUT: 'Paramètres',
-  STEP_2_CONCEPT_REVIEW: 'Concept à valider',
-  STEP_3_OUTLINE_REVIEW: 'Trame à valider',
-  STEP_4_SAMPLE_REVIEW: 'Échantillon à valider',
-  STEP_5_WRITING: 'Écriture',
-  COMPLETED: 'Terminé',
+  STEP_1_INPUT: 'Étape 1 : Vos idées',
+  STEP_2_CONCEPT_REVIEW: 'Étape 2 : Résumé à relire',
+  STEP_3_OUTLINE_REVIEW: 'Étape 3 : Chapitres à relire',
+  STEP_4_SAMPLE_REVIEW: 'Étape 4 : Premières pages',
+  STEP_5_WRITING: 'Étape 5 : Écriture du livre',
+  COMPLETED: 'Livre terminé',
 };
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const { isSimple } = useUiMode();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [creating, setCreating] = useState(false);
   const [toDelete, setToDelete] = useState<Project | null>(null);
@@ -36,7 +39,7 @@ export function Dashboard() {
     e.preventDefault();
     void run(async () => {
       const p = await pb.collection('projects').create({
-        user: pb.authStore.record?.id, title, language: 'fr', length_preset: 'ROMAN', target_chapter_count: 20, target_words_per_chapter: 3500,
+        user: pb.authStore.record?.id, title, language: 'fr', length_preset: 'ROMAN', target_chapter_count: 12, target_words_per_chapter: 3000,
       });
       navigate(`/projects/${p.id}`);
     });
@@ -45,40 +48,61 @@ export function Dashboard() {
   return (
     <AppShell>
       <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
-        <div className="flex items-center justify-between gap-4">
-          <h1 className="font-serif text-2xl font-semibold">Mes livres</h1>
-          <Button onClick={() => setCreating(true)}><Plus size={16} /> Nouveau livre</Button>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <h1 className="font-serif text-3xl font-bold">Mes livres</h1>
+          <Button
+            onClick={() => setCreating(true)}
+            className={isSimple ? 'h-14 px-6 text-lg font-bold' : undefined}
+          >
+            <Plus size={isSimple ? 22 : 16} /> Écrire un nouveau livre (ou une suite)
+          </Button>
         </div>
         <ErrorNote error={error} />
         {projects?.length === 0 && (
           <Card className="py-12 text-center">
-            <BookOpen className="mx-auto text-muted" />
-            <p className="mt-2 text-sm text-muted">Aucun livre pour l'instant. Commence par en créer un.</p>
+            <BookOpen size={36} className="mx-auto text-muted" />
+            <p className="mt-3 text-lg text-muted">Vous n'avez pas encore de livre. Cliquez sur « Écrire un nouveau livre » pour commencer.</p>
           </Card>
         )}
-        <ul className="grid gap-3 sm:grid-cols-2">
+        <ul className={isSimple ? 'grid gap-4' : 'grid gap-3 sm:grid-cols-2'}>
           {projects?.map((p) => (
             <li key={p.id}>
-              <Card className="flex items-start justify-between gap-2 p-4 hover:border-accent/50">
-                <Link to={`/projects/${p.id}`} className="min-w-0 flex-1">
-                  <span className="block truncate font-serif text-lg font-semibold">{p.title}</span>
-                  <Badge className="mt-2">{LABELS[p.status]}</Badge>
+              <Card className="flex items-center justify-between gap-4 p-5 hover:border-accent">
+                <Link to={`/projects/${p.id}`} className="min-w-0 flex-1 space-y-2">
+                  <span className="block truncate font-serif text-2xl font-bold">{p.title}</span>
+                  <Badge className="text-sm">{LABELS[p.status]}</Badge>
                 </Link>
-                <Button variant="ghost" size="icon" aria-label={`Supprimer ${p.title}`} onClick={() => setToDelete(p)}>
-                  <Trash2 size={14} />
-                </Button>
+                {isSimple ? (
+                  <Button asChild className="h-12 px-6 text-base font-bold">
+                    <Link to={`/projects/${p.id}`}>Ouvrir mon livre</Link>
+                  </Button>
+                ) : (
+                  <Button variant="ghost" size="icon" aria-label={`Supprimer ${p.title}`} onClick={() => setToDelete(p)}>
+                    <Trash2 size={14} />
+                  </Button>
+                )}
               </Card>
             </li>
           ))}
         </ul>
       </div>
 
-      <Dialog open={creating} onOpenChange={setCreating} title="Nouveau livre">
+      <Dialog open={creating} onOpenChange={setCreating} title="Commencer un nouveau livre">
         <form onSubmit={create} className="space-y-4">
-          <Field label="Titre (provisoire)">
-            <Input autoFocus required value={title} onChange={(e) => setTitle(e.target.value)} />
+          <Field label="Comment s'appelle votre nouveau livre ? (vous pourrez le changer plus tard)">
+            <Input autoFocus required className="h-12 text-lg" value={title} onChange={(e) => setTitle(e.target.value)} />
           </Field>
-          <div className="flex justify-end"><Button type="submit" disabled={busy}>Créer</Button></div>
+          {isSimple && (
+            <VoiceDictationButton
+              label="Dicter le titre au micro"
+              onTranscript={(spoken) => setTitle((prev) => (prev.trim() ? `${prev.trim()} ${spoken}` : spoken))}
+            />
+          )}
+          <div className="flex justify-end pt-2">
+            <Button type="submit" disabled={busy} className="h-12 px-6 text-base font-bold">
+              Continuer
+            </Button>
+          </div>
         </form>
       </Dialog>
 

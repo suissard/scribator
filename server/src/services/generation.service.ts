@@ -4,13 +4,13 @@ import { AppError, badRequest, conflict } from '../lib/errors.js';
 import { DraftWriter } from '../lib/draftWriter.js';
 import { loadPrompt, renderTemplate } from '../lib/prompts.js';
 import {
-  AiChapterMemorySchema, AiConceptSchema, AiOutlineSchema, AiScenePlanSchema, AiStyleLearningSchema, AiSynopsisSchema,
+  AiChapterMemorySchema, AiConceptSchema, AiOutlineSchema, AiReferenceExtractSchema, AiScenePlanSchema, AiStyleLearningSchema, AiSynopsisSchema,
   StyleMatrixSchema,
-  type BiblePatch, type ChapterRecord, type ProjectRecord, type SceneRecord, type StoryBible, type StyleMatrix, type StyleSuggestion,
+  type BiblePatch, type ChapterRecord, type ProjectRecord, type ReferenceMeta, type SceneRecord, type StoryBible, type StyleMatrix, type StyleSuggestion,
 } from '../types.js';
 import { estimateBookTokens, type ChapterWork } from './book-estimate.js';
 import { applyBiblePatch, bibleWithIds, toBiblePatch, toStyleSuggestion } from './bible.service.js';
-import { buildSampleContext, buildSceneContext, formatBibleWithIds, formatStyleMatrix, type ProjectContext } from './context.service.js';
+import { buildSampleContext, buildSceneContext, formatBibleWithIds, formatReferenceMemory, formatStyleMatrix, type ProjectContext } from './context.service.js';
 import { settledChapterStatus, type JobHandle } from './jobs.service.js';
 import { isAbortError, type CallContext, type LlmService } from './llm.service.js';
 import {
@@ -98,7 +98,7 @@ export class GenerationService {
   async analyze(job: JobHandle, projectId: string, feedback?: string): Promise<void> {
     const project = await this.getProject(projectId);
     let style = project.style_matrix;
-    let meta: unknown = project.reference_meta;
+    let meta: ReferenceMeta | null = project.reference_meta;
     const language = project.language || 'fr';
     await job.stages(
       [
@@ -113,7 +113,12 @@ export class GenerationService {
       const parsed = await job.step('read', { detail: "Lecture de l'ouvrage" }, async () => parseReference(await this.downloadReference(project)));
       job.assertNotCancelled();
       const prompt = loadPrompt('style_extract');
-      style = await job.step('style', { detail: 'Analyse du style' }, () =>
+      const excerpts = [
+        `## Début du livre (introduction des personnages et du cadre)\n\n${parsed.opening}`,
+        ...parsed.segments.map((s, i) => `## Extrait central ${i + 1}\n\n${s}`),
+        `## Fin du livre (dénouement et situation finale des personnages)\n\n${parsed.ending}`,
+      ].join('\n\n');
+      const extracted = await job.step('style', { detail: "Analyse du style, de l'histoire et des personnages" }, () =>
         this.llm.structured({
           ctx: job.ctx,
           purpose: 'style_extract',
@@ -121,18 +126,21 @@ export class GenerationService {
           model: this.env.AI_MODEL_FAST,
           user: renderTemplate(prompt.text, {
             language,
-            segments: parsed.segments.map((s, i) => `## Extrait ${i + 1}\n\n${s}`).join('\n\n'),
+            segments: excerpts,
           }),
-          schema: StyleMatrixSchema,
+          schema: AiReferenceExtractSchema,
           maxTokens: STRUCTURED_MAX_TOKENS,
           signal: job.signal,
         }),
       );
+      const { story_memory, ...extractedStyle } = extracted;
+      style = StyleMatrixSchema.parse(extractedStyle);
       meta = {
         filename: project.reference_file,
         word_count: parsed.wordCount,
         language: parsed.language,
         analyzed_at: new Date().toISOString(),
+        story_memory,
       };
     }
     if (!style) style = await job.step('style', { detail: 'Choix du style' }, () => this.inventStyle(job, project, language));
@@ -153,7 +161,10 @@ export class GenerationService {
           audience: project.audience,
           target_chapter_count: project.target_chapter_count,
           target_words_per_chapter: project.target_words_per_chapter,
-          raw_ideas: project.raw_ideas,
+          raw_ideas: project.raw_ideas.trim() || "(L'auteur s'appuie sur le livre fourni ci-dessous pour en écrire la suite.)",
+          reference_story: meta?.story_memory
+            ? section("Livre précédent fourni par l'auteur (histoire, fin et personnages)", formatReferenceMemory(meta.story_memory))
+            : '',
           style_matrix: formatStyleMatrix(matrix),
           feedback: section("Retour de l'auteur sur la version précédente", feedback),
         }),

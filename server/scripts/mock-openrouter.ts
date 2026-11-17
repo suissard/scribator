@@ -71,6 +71,17 @@ function structuredAnswer(schema: any, prompt: string): unknown {
       narrative_pov: 'troisième personne limitée', tense: 'passé simple', sentence_structure: 'phrases courtes, parfois nominales',
       dialogue_style: 'rares, sans incise', stylistic_rules: ['Préférer le concret à l’abstrait', 'Une image par paragraphe'],
       forbidden_tropes: ['le rêve explicatif'], forbidden_phrases: ['un frisson lui parcourut l’échine'],
+      ...(props.story_memory
+        ? {
+            story_memory: {
+              summary: 'Marthe veille seule sur le phare de la Vieille depuis la disparition en mer de son mari.',
+              ending_state: 'Un carnet échoue au pied du phare lors de la grande marée, annonçant une vérité cachée.',
+              characters: [{ name: 'Marthe', role: 'principal', traits: 'taciturne, obstinée', current_status: 'gardienne du phare' }],
+              locations: [{ name: 'Le phare de la Vieille', description: 'tour isolée face au large' }],
+              world_rules: [{ rule: 'Les courants ramènent les épaves aux équinoxes' }],
+            },
+          }
+        : {}),
     };
   }
   if (props.reformulated_concept) {
