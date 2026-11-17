@@ -20,11 +20,19 @@ export interface StoryBible {
   timeline_events: Array<{ id: string; chapter_number: number; event: string }>;
 }
 
+export interface ReferenceMemory {
+  summary: string;
+  ending_state: string;
+  characters: Array<{ name: string; role: 'principal' | 'secondaire' | 'figurant'; traits: string; current_status: string }>;
+  locations: Array<{ name: string; description: string }>;
+  world_rules: Array<{ rule: string }>;
+}
+
 export interface Project {
   id: string; user: string; title: string; language: string; genre: string; audience: string;
   status: ProjectStatus; length_preset: LengthPreset; target_chapter_count: number; target_words_per_chapter: number;
   reference_file: string;
-  reference_meta: { filename: string; word_count: number; language: string; analyzed_at: string } | null;
+  reference_meta: { filename: string; word_count: number; language: string; analyzed_at: string; story_memory?: ReferenceMemory } | null;
   raw_ideas: string; model_creative: string; style_matrix: StyleMatrix | null; story_bible: StoryBible | null;
   reformulated_concept: string; sample_text: string; sample_ai_original: string; sample_draft: string;
   updated: string;

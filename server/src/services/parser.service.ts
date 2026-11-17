@@ -6,10 +6,12 @@ import { AppError, badRequest } from '../lib/errors.js';
 export type FileKind = 'pdf' | 'docx' | 'epub' | 'txt';
 
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
-const MIN_WORDS_PER_PDF_PAGE = 200;
+const MIN_WORDS_PER_PDF_PAGE = 25;
 const MIN_WORDS = 3000;
 const SEGMENT_WORDS = 3000;
 const FULL_SEGMENTS_THRESHOLD = 12_000;
+const OPENING_WORDS = 2000;
+const ENDING_WORDS = 2500;
 
 /** Type réel du fichier, déduit de sa signature binaire et jamais de son extension. */
 export async function detectFileKind(buf: Buffer): Promise<FileKind> {
@@ -147,7 +149,9 @@ export function cleanText({ pages, paged }: Extracted): string {
     if (t && t.length < 200 && COPYRIGHT.test(t)) continue;
     kept.push(line.trimEnd());
   }
-  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  const joined = kept.join('\n').replace(/\n{3,}/g, '\n\n');
+  // Dans un PDF mis en page, les mots coupés en fin de ligne (« souve-\nnir ») sont recollés.
+  return (paged ? joined.replace(/(\p{L})-\n\s*(\p{Ll})/gu, '$1$2') : joined).trim();
 }
 
 /** 3 segments de 3 000 mots à 15 %, 50 % et 85 % ; répartis sans chevauchement si le livre est court. */
@@ -195,13 +199,30 @@ export function detectLanguage(text: string): string {
 
 export interface ParsedReference {
   segments: string[];
+  opening: string;
+  ending: string;
   wordCount: number;
   language: string;
+}
+
+/** Début et fin du livre : indispensables pour identifier les personnages introduits au départ et la situation finale (suite de roman). */
+export function bookEnds(text: string): { opening: string; ending: string } {
+  const tokens = text.match(/\S+\s*/g) ?? [];
+  const opening = tokens.slice(0, OPENING_WORDS).join('').trim();
+  const ending = tokens.slice(Math.max(0, tokens.length - ENDING_WORDS)).join('').trim();
+  return { opening, ending };
 }
 
 export async function parseReference(buf: Buffer): Promise<ParsedReference> {
   if (buf.length > MAX_UPLOAD_BYTES) throw badRequest('Le fichier dépasse la limite de 20 Mo.');
   const kind = await detectFileKind(buf);
   const text = cleanText(await extractRaw(buf, kind));
-  return { segments: sampleSegments(text), wordCount: countWords(text), language: detectLanguage(text) };
+  const { opening, ending } = bookEnds(text);
+  return {
+    segments: sampleSegments(text),
+    opening,
+    ending,
+    wordCount: countWords(text),
+    language: detectLanguage(text),
+  };
 }

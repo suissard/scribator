@@ -17,7 +17,11 @@
 
 body { background: var(--color-paper); color: var(--color-ink); font-family: var(--font-sans); }
 
+html[data-font-scale="large"] { font-size: 18px; }
+html[data-font-scale="xlarge"] { font-size: 21px; }
+
 .prose-book { font-family: var(--font-serif); font-size: 1.0625rem; line-height: 1.75; }
+html[data-ui-mode="simple"] .prose-book { font-size: 1.2rem; line-height: 1.85; }
 .prose-book p { margin-bottom: 0.9em; }
 .prose-book hr { border: 0; text-align: center; margin: 1.5em 0; }
 .prose-book hr::after { content: "* * *"; color: var(--color-muted); }

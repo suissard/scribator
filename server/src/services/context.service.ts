@@ -1,5 +1,5 @@
 import { renderTemplate } from '../lib/prompts.js';
-import type { ChapterRecord, StoryBible, StyleMatrix } from '../types.js';
+import type { ChapterRecord, ReferenceMemory, StoryBible, StyleMatrix } from '../types.js';
 import { buildMemoryBlock, chooseMemoryMode, sortChapters, type MemoryMode, type PreviousChapter } from './memory.service.js';
 
 /* Toutes les fonctions de ce fichier sont pures : à entrée identique, sortie identique à l'octet près.
@@ -61,6 +61,26 @@ export function formatBibleWithIds(b: StoryBible): string {
     '',
     '### Chronologie',
     bullets(b.timeline_events.map((e) => `[${e.id}] Chapitre ${e.chapter_number} : ${e.event}`)),
+  ].join('\n');
+}
+
+/** Synthèse de l'ouvrage précédent fourni par l'auteur (histoire, situation finale et personnages). */
+export function formatReferenceMemory(m: ReferenceMemory): string {
+  return [
+    '### Résumé du livre fourni',
+    m.summary.trim() || '(aucun)',
+    '',
+    '### Situation à la fin du livre fourni',
+    m.ending_state.trim() || '(aucune)',
+    '',
+    '### Personnages identifiés dans le livre fourni',
+    bullets(m.characters.map((c) => `**${c.name}** (${c.role}) : ${c.traits}. État à la fin : ${c.current_status}`)),
+    '',
+    '### Lieux du livre fourni',
+    bullets(m.locations.map((l) => `**${l.name}** : ${l.description}`)),
+    '',
+    '### Univers et règles du livre fourni',
+    bullets(m.world_rules.map((r) => r.rule)),
   ].join('\n');
 }
 

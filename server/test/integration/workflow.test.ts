@@ -111,6 +111,8 @@ describe('tranches 2 et 3 : du fichier à l’échantillon', () => {
     expect(after.reference_file).toBe('');
     expect(after.reference_meta.word_count).toBeGreaterThan(20_000);
     expect(after.reference_meta.language).toBe('fr');
+    expect(after.reference_meta.story_memory.summary).toContain('Marthe');
+    expect(after.reference_meta.story_memory.characters[0].name).toBe('Marthe');
     expect(after.style_matrix.tone).toBeTruthy();
     expect(after.story_bible.characters[0].id).toMatch(/^char_/);
     expect(after.reformulated_concept).toContain('Pitch');

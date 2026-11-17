@@ -4,6 +4,7 @@ import { subscribe } from '@/api/realtime';
 import { AppShell } from '@/components/layout/AppShell';
 import { JobBar } from '@/components/layout/JobBar';
 import { maxStep, StepIndicator } from '@/components/layout/StepIndicator';
+import { SimpleWorkspace } from '@/components/simple/SimpleWorkspace';
 import { Step1Input } from '@/components/steps/Step1Input';
 import { Step2Concept } from '@/components/steps/Step2Concept';
 import { Step3Outline } from '@/components/steps/Step3Outline';
@@ -14,12 +15,14 @@ import { ErrorNote } from '@/components/ui/ErrorNote';
 import { pb } from '@/api/pocketbase';
 import type { Chapter, Job, PendingChange, Project, Scene } from '@/lib/types';
 import { log } from '@/lib/logger';
+import { useUiMode } from '@/lib/uiMode';
 import { useProjectStore } from '@/store/useProjectStore';
 
 export function ProjectWorkspace() {
   const { id = '' } = useParams();
   const s = useProjectStore();
   const { project, activeJob, activeStepView, activeChapterId, lastJobError } = s;
+  const { isSimple } = useUiMode();
   const [notFound, setNotFound] = useState(false);
   const shownStatus = useRef<string | null>(null);
   const [usageKey, setUsageKey] = useState(0);
@@ -100,8 +103,8 @@ export function ProjectWorkspace() {
 
   return (
     <AppShell usageKey={usageKey}>
-      <div className="sticky top-14 z-10">
-        <StepIndicator status={project.status} active={activeStepView} onSelect={s.setStep} />
+      <div className="sticky top-16 z-10">
+        {!isSimple && <StepIndicator status={project.status} active={activeStepView} onSelect={s.setStep} />}
         {activeJob && <JobBar job={activeJob} />}
       </div>
       {lastJobError && (
@@ -109,12 +112,18 @@ export function ProjectWorkspace() {
           <ErrorNote error={lastJobError} />
         </div>
       )}
-      {activeStepView === 1 && <Step1Input key={project.id} project={project} />}
-      {activeStepView === 2 && <Step2Concept project={project} />}
-      {activeStepView === 3 && <Step3Outline project={project} />}
-      {activeStepView === 4 && <Step4Sample project={project} />}
-      {activeStepView === 5 && <Step5Studio project={project} />}
-      {activeStepView === 6 && <Step6Export project={project} />}
+      {isSimple ? (
+        <SimpleWorkspace project={project} />
+      ) : (
+        <>
+          {activeStepView === 1 && <Step1Input key={project.id} project={project} />}
+          {activeStepView === 2 && <Step2Concept project={project} />}
+          {activeStepView === 3 && <Step3Outline project={project} />}
+          {activeStepView === 4 && <Step4Sample project={project} />}
+          {activeStepView === 5 && <Step5Studio project={project} />}
+          {activeStepView === 6 && <Step6Export project={project} />}
+        </>
+      )}
     </AppShell>
   );
 }

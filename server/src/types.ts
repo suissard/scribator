@@ -70,6 +70,28 @@ export const AiBibleSchema = z.object({
   timeline_events: z.array(TimelineEventSchema.omit({ id: true })),
 });
 
+export const ReferenceMemorySchema = z.object({
+  summary: z.string(),
+  ending_state: z.string(),
+  characters: z.array(CharacterSchema.omit({ id: true })),
+  locations: z.array(LocationSchema.omit({ id: true })),
+  world_rules: z.array(WorldRuleSchema.omit({ id: true })),
+});
+export type ReferenceMemory = z.infer<typeof ReferenceMemorySchema>;
+
+export const AiReferenceExtractSchema = StyleMatrixSchema.extend({
+  story_memory: ReferenceMemorySchema,
+});
+export type AiReferenceExtract = z.infer<typeof AiReferenceExtractSchema>;
+
+export interface ReferenceMeta {
+  filename: string;
+  word_count: number;
+  language: string;
+  analyzed_at: string;
+  story_memory?: ReferenceMemory;
+}
+
 export const AiConceptSchema = z.object({ reformulated_concept: z.string(), story_bible: AiBibleSchema });
 
 export const AiOutlineSchema = z.object({
@@ -149,7 +171,7 @@ export interface ProjectRecord {
   target_chapter_count: number;
   target_words_per_chapter: number;
   reference_file: string;
-  reference_meta: unknown;
+  reference_meta: ReferenceMeta | null;
   raw_ideas: string;
   model_creative: string;
   style_matrix: StyleMatrix | null;
