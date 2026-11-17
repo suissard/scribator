@@ -1,8 +1,8 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type PocketBase from 'pocketbase';
 import type { Env } from '../config/env.js';
-import { AppError, notFound } from '../lib/errors.js';
-import { createUserClient } from '../lib/pb.js';
+import { AppError, notFound, storageUnavailable } from '../lib/errors.js';
+import { createUserClient, isPbOutage, isPbRejection } from '../lib/pb.js';
 
 export interface AuthUser {
   id: string;
@@ -30,8 +30,10 @@ export const authenticate = (env: Env) =>
       const { record } = await pb.collection('users').authRefresh();
       req.user = record as unknown as AuthUser;
       req.userPb = pb;
-    } catch {
-      throw unauthorized();
+    } catch (e) {
+      if (isPbRejection(e, [400, 401, 403, 404])) throw unauthorized();
+      req.log.error({ err: e }, "PocketBase injoignable pendant l'authentification");
+      throw isPbOutage(e) ? storageUnavailable() : e;
     }
   };
 
@@ -39,7 +41,9 @@ export const authenticate = (env: Env) =>
 export async function getOwned<T>(req: FastifyRequest, collection: string, id: string): Promise<T> {
   try {
     return (await req.userPb.collection(collection).getOne(id)) as T;
-  } catch {
-    throw notFound();
+  } catch (e) {
+    if (isPbRejection(e, [400, 403, 404])) throw notFound();
+    req.log.error({ err: e, collection }, 'lecture PocketBase impossible');
+    throw isPbOutage(e) ? storageUnavailable() : e;
   }
 }

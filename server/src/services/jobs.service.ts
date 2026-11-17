@@ -11,6 +11,10 @@ export interface ActiveJob {
   controller: AbortController;
   keepPartial: boolean;
   timedOut: boolean;
+  /** Arrêt du serveur : le job est interrompu, pas annulé par l'auteur. */
+  shuttingDown: boolean;
+  /** Résolue quand le job a fini de se ranger (statut écrit, verrou relâché). */
+  settled: Promise<void>;
 }
 
 export interface JobHandle {
@@ -43,6 +47,8 @@ export function humanMessage(e: unknown): string {
 }
 
 const nowIso = () => new Date().toISOString().replace('T', ' ');
+
+export const SHUTDOWN_MESSAGE = 'Serveur arrêté pendant la génération. Relance-la : le travail déjà fait est conservé.';
 
 export class JobsService {
   readonly activeJobs = new Map<string, ActiveJob>();
@@ -81,7 +87,14 @@ export class JobsService {
       this.locks.release(input.projectId);
       throw e;
     }
-    const active: ActiveJob = { controller: new AbortController(), keepPartial: false, timedOut: false };
+    let markSettled!: () => void;
+    const active: ActiveJob = {
+      controller: new AbortController(),
+      keepPartial: false,
+      timedOut: false,
+      shuttingDown: false,
+      settled: new Promise<void>((resolve) => (markSettled = resolve)),
+    };
     this.activeJobs.set(record.id, active);
     // Une progression non enregistrée ne doit pas faire perdre un texte déjà payé.
     const tracker = new ProgressTracker((progress) =>
@@ -108,7 +121,7 @@ export class JobsService {
         if (active.controller.signal.aborted) throw new JobCancelled();
       },
     };
-    void this.execute(input, record.id, handle);
+    void this.execute(input, record.id, handle).finally(markSettled);
     return record.id;
   }
 
@@ -128,6 +141,9 @@ export class JobsService {
       if (handle.active.timedOut) {
         status = 'FAILED';
         error = `Génération interrompue : délai de ${this.env.JOB_TIMEOUT_MINUTES} minutes dépassé.`;
+      } else if (handle.active.shuttingDown) {
+        status = 'FAILED';
+        error = SHUTDOWN_MESSAGE;
       } else if (isAbortError(e)) {
         status = 'CANCELLED';
       } else {
@@ -158,6 +174,27 @@ export class JobsService {
     active.controller.abort();
   }
 
+  /**
+   * Arrêt du serveur (redéploiement) : les jobs en cours sont coupés et rangés comme une erreur, pour
+   * que l'auteur voie un message clair et que rien ne reste en `RUNNING`. Au-delà du délai, le
+   * nettoyage au redémarrage prend le relais.
+   */
+  async shutdown(timeoutMs = 10_000): Promise<void> {
+    this.stopWatchdog();
+    const running = [...this.activeJobs.values()];
+    if (running.length === 0) return;
+    this.log.warn({ count: running.length }, 'arrêt du serveur, jobs en cours interrompus');
+    for (const active of running) {
+      active.shuttingDown = true;
+      active.controller.abort();
+    }
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<'timeout'>((resolve) => (timer = setTimeout(() => resolve('timeout'), timeoutMs)));
+    const outcome = await Promise.race([Promise.all(running.map((a) => a.settled)), timeout]);
+    clearTimeout(timer);
+    if (outcome === 'timeout') this.log.warn({}, "jobs non rangés à temps, le redémarrage s'en chargera");
+  }
+
   /** §6 : après un crash, rien ne doit rester en cours. Les filtres couvrent aussi un état sans job. */
   async recoverOnStartup(): Promise<void> {
     const jobs = await this.pb.collection('generation_jobs').getFullList<JobRecord>({ filter: 'status = "RUNNING"' });
@@ -172,19 +209,25 @@ export class JobsService {
       .update(job.id, { status: 'FAILED', error_message: reason, finished_at: nowIso() });
   }
 
-  private async restoreOrphans(): Promise<void> {
+  /**
+   * Remet d'aplomb ce qu'un job mort a laissé en cours. Sans `projectId` (démarrage), tout est
+   * concerné ; sinon seulement ce projet, car d'autres jobs vivants écrivent peut-être ailleurs.
+   */
+  private async restoreOrphans(projectId?: string): Promise<void> {
     const pb = this.pb;
-    const projects = await pb.collection('projects').getFullList({ filter: 'sample_draft != ""', fields: 'id' });
+    const scope = (filter: string, path: string) =>
+      projectId ? pb.filter(`(${filter}) && ${path} = {:p}`, { p: projectId }) : filter;
+    const projects = await pb.collection('projects').getFullList({ filter: scope('sample_draft != ""', 'id'), fields: 'id' });
     for (const p of projects) await pb.collection('projects').update(p.id, { sample_draft: '' });
 
-    const scenes = await pb.collection('scenes').getFullList<SceneRecord>({ filter: 'status = "GENERATING"' });
+    const scenes = await pb.collection('scenes').getFullList<SceneRecord>({ filter: scope('status = "GENERATING"', 'chapter.project') });
     for (const s of scenes) {
       await pb.collection('scenes').update(s.id, { draft: '', status: s.content.trim() ? 'REVIEW' : 'PENDING' });
     }
-    const leftovers = await pb.collection('scenes').getFullList({ filter: 'draft != ""', fields: 'id' });
+    const leftovers = await pb.collection('scenes').getFullList({ filter: scope('draft != ""', 'chapter.project'), fields: 'id' });
     for (const s of leftovers) await pb.collection('scenes').update(s.id, { draft: '' });
 
-    const chapters = await pb.collection('chapters').getFullList<ChapterRecord>({ filter: 'status = "GENERATING"' });
+    const chapters = await pb.collection('chapters').getFullList<ChapterRecord>({ filter: scope('status = "GENERATING"', 'project') });
     for (const c of chapters) {
       const list = await pb.collection('scenes').getFullList<SceneRecord>({
         filter: pb.filter('chapter = {:c}', { c: c.id }),
@@ -211,7 +254,7 @@ export class JobsService {
         active.controller.abort();
       } else {
         await this.failStuckJob(job, `Délai de ${this.env.JOB_TIMEOUT_MINUTES} minutes dépassé`);
-        await this.restoreOrphans();
+        await this.restoreOrphans(job.project);
         this.locks.release(job.project);
       }
     }
