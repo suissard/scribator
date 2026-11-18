@@ -12,6 +12,7 @@ import { ErrorNote } from '@/components/ui/ErrorNote';
 import { flushAllAutosaves } from '@/lib/autosaveRegistry';
 import type { Chapter, ChapterStatus, Project } from '@/lib/types';
 import { useAction } from '@/lib/useAction';
+import { toastError } from '@/lib/toast';
 import { cn, countWords, formatNumber } from '@/lib/utils';
 import { useProjectStore } from '@/store/useProjectStore';
 
@@ -111,7 +112,7 @@ export function Step5Studio({ project }: { project: Project }) {
   }, [activeId, chapters, setActive]);
 
   useEffect(() => {
-    if (activeId) void loadScenes(activeId);
+    if (activeId) loadScenes(activeId).catch(() => toastError('Impossible de charger les scènes de ce chapitre.'));
   }, [activeId, loadScenes]);
 
   // L'écriture automatique emmène le lecteur avec elle, sauf s'il est parti lire un autre chapitre.

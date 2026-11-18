@@ -10,7 +10,8 @@ interface ProjectState {
   scenes: Scene[];
   changes: PendingChange[];
   activeJob: Job | null;
-  lastJobError: string | null;
+  /** Dernier job en échec : la barre reste affichée, figée là où il a planté, jusqu'à ce qu'on la ferme. */
+  failedJob: Job | null;
   activeStepView: StepView;
   activeChapterId: string | null;
   setStep(step: StepView): void;
@@ -41,7 +42,7 @@ function upsert<T extends { id: string }>(list: T[], item: T): T[] {
 }
 
 const initial = {
-  project: null, chapters: [], scenes: [], changes: [], activeJob: null, lastJobError: null,
+  project: null, chapters: [], scenes: [], changes: [], activeJob: null, failedJob: null,
   activeStepView: 1 as StepView, activeChapterId: null,
 };
 
@@ -58,11 +59,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set((s) => ({ changes: c.status === 'PENDING' ? upsert(s.changes, c) : s.changes.filter((x) => x.id !== c.id) })),
   applyJob: (job) =>
     set((s) => {
-      if (job.status === 'RUNNING') return { activeJob: job };
+      if (job.status === 'RUNNING') return { activeJob: job, failedJob: null };
       if (s.activeJob && s.activeJob.id !== job.id) return {};
-      return { activeJob: null, lastJobError: job.status === 'FAILED' ? job.error_message || 'La génération a échoué.' : null };
+      return { activeJob: null, failedJob: job.status === 'FAILED' ? job : null };
     }),
-  clearJobError: () => set({ lastJobError: null }),
+  clearJobError: () => set({ failedJob: null }),
   async load(id) {
     const [project, chapters, changes, jobs] = await Promise.all([
       pb.collection('projects').getOne<Project>(id),
@@ -75,7 +76,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       project, chapters, changes,
       activeJob: latest?.status === 'RUNNING' ? latest : null,
       // Onglet fermé pendant l'analyse : l'échec doit rester visible au retour.
-      lastJobError: latest?.status === 'FAILED' && project.status === 'STEP_1_INPUT' ? latest.error_message : null,
+      // Un rechargement de filet de sécurité ne doit pas non plus effacer un échec qu'on vient d'afficher.
+      failedJob: latest?.status === 'FAILED' && (project.status === 'STEP_1_INPUT' || get().failedJob?.id === latest.id) ? latest : null,
     });
   },
   async loadChapters() {

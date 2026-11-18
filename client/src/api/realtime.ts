@@ -1,5 +1,7 @@
 import type { RecordModel, RecordSubscription } from 'pocketbase';
 import { getMockMode } from '@/lib/mockState';
+import { reportError } from '@/lib/errorReporting';
+import { toastError } from '@/lib/toast';
 import { pb } from './pocketbase';
 
 type Handler<T> = (e: RecordSubscription<T & RecordModel>) => void;
@@ -36,6 +38,11 @@ export function subscribe<T>(collection: string, filter: string, handler: Handle
     .then((un) => {
       if (stopped) void un();
       else unsubscribe = un;
+    })
+    .catch((e: unknown) => {
+      if (stopped) return;
+      reportError(`Abonnement Realtime impossible (${collection}) : ${String(e)}`);
+      toastError("Le suivi en direct est indisponible : recharge la page pour voir les dernières modifications.");
     });
   return () => {
     stopped = true;
