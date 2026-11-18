@@ -24,6 +24,7 @@ import { SpeakButton, VoiceDictationButton } from '@/components/ui/VoiceTools';
 import { flushAllAutosaves } from '@/lib/autosaveRegistry';
 import type { Chapter, Project, Scene } from '@/lib/types';
 import { useAction } from '@/lib/useAction';
+import { toastError } from '@/lib/toast';
 import { useAutoSave } from '@/lib/useAutoSave';
 import { cn } from '@/lib/utils';
 import { useProjectStore, type StepView } from '@/store/useProjectStore';
@@ -593,7 +594,7 @@ function SimpleStep5Book({ project }: { project: Project }) {
   }, [activeId, chapters, setActive]);
 
   useEffect(() => {
-    if (activeId) void loadScenes(activeId);
+    if (activeId) loadScenes(activeId).catch(() => toastError('Impossible de charger les scènes de ce chapitre.'));
   }, [activeId, loadScenes]);
 
   const index = chapters.findIndex((c) => c.id === activeId);

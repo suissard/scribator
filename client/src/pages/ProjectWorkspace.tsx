@@ -11,17 +11,17 @@ import { Step3Outline } from '@/components/steps/Step3Outline';
 import { Step4Sample } from '@/components/steps/Step4Sample';
 import { Step5Studio } from '@/components/steps/Step5Studio';
 import { Step6Export } from '@/components/steps/Step6Export';
-import { ErrorNote } from '@/components/ui/ErrorNote';
 import { pb } from '@/api/pocketbase';
 import type { Chapter, Job, PendingChange, Project, Scene } from '@/lib/types';
 import { log } from '@/lib/logger';
+import { toastError } from '@/lib/toast';
 import { useUiMode } from '@/lib/uiMode';
 import { useProjectStore } from '@/store/useProjectStore';
 
 export function ProjectWorkspace() {
   const { id = '' } = useParams();
   const s = useProjectStore();
-  const { project, activeJob, activeStepView, activeChapterId, lastJobError } = s;
+  const { project, activeJob, activeStepView, activeChapterId, failedJob } = s;
   const { isSimple } = useUiMode();
   const [notFound, setNotFound] = useState(false);
   const shownStatus = useRef<string | null>(null);
@@ -54,9 +54,10 @@ export function ProjectWorkspace() {
         if (e.record.status !== 'RUNNING') {
           setUsageKey((k) => k + 1);
           // Filet de sécurité : un événement Realtime a pu être perdu pendant le job.
-          void store.load(id);
+          const refreshFailed = () => toastError("Impossible de rafraîchir le livre : recharge la page pour voir le résultat.");
+          store.load(id).catch(refreshFailed);
           const chapterId = store.activeChapterId;
-          if (chapterId) void store.loadScenes(chapterId);
+          if (chapterId) store.loadScenes(chapterId).catch(refreshFailed);
         }
       }),
     ];
@@ -105,13 +106,8 @@ export function ProjectWorkspace() {
     <AppShell usageKey={usageKey}>
       <div className="sticky top-16 z-10">
         {!isSimple && <StepIndicator status={project.status} active={activeStepView} onSelect={s.setStep} />}
-        {activeJob && <JobBar job={activeJob} />}
+        {activeJob ? <JobBar job={activeJob} /> : failedJob && <JobBar job={failedJob} onDismiss={s.clearJobError} />}
       </div>
-      {lastJobError && (
-        <div className="mx-auto mt-4 max-w-3xl px-4">
-          <ErrorNote error={lastJobError} />
-        </div>
-      )}
       {isSimple ? (
         <SimpleWorkspace project={project} />
       ) : (

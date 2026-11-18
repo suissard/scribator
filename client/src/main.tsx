@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, HashRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { pb } from '@/api/pocketbase';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { Toaster } from '@/components/ui/Toaster';
 import { installGlobalHandlers } from '@/lib/errorReporting';
 import { Dashboard } from '@/pages/Dashboard';
 import { Login } from '@/pages/Login';
@@ -35,6 +36,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
+      <Toaster />
     </ErrorBoundary>
   </StrictMode>,
 );
