@@ -19,7 +19,7 @@ export function UsageBadge({ refreshKey }: { refreshKey?: unknown }) {
   const ratio = usage.budget_usd > 0 ? usage.spent_usd / usage.budget_usd : 1;
   return (
     <span
-      title="Coût des appels IA ce mois-ci, sur ton budget mensuel"
+      title="Coût des appels IA ce mois-ci, sur votre budget mensuel"
       className={cn('inline-flex items-center gap-1.5 text-xs tabular-nums', ratio >= 0.8 ? 'font-medium text-stale' : 'text-muted')}
     >
       <Wallet size={14} />

@@ -3,7 +3,7 @@
  * Le temps restant d'une étape vaut donc durée moyenne × maillons restants. La moyenne vient de
  * l'historique au démarrage, puis des maillons réellement mesurés pendant ce job.
  */
-export type StageKey = 'read' | 'style' | 'concept' | 'sample' | 'plan' | 'write' | 'memory';
+export type StageKey = 'read' | 'style' | 'concept' | 'outline' | 'sample' | 'plan' | 'write' | 'memory';
 
 /** run : mesuré sur ce job. history : appels passés. default : aucune donnée, valeur de départ. */
 export type EstimateBasis = 'run' | 'history' | 'default';

@@ -1,13 +1,21 @@
 import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
+  ArrowUp,
   BookOpen,
   Check,
+  ChevronDown,
+  ChevronUp,
   Download,
   FileUp,
   PenLine,
+  Plus,
   RefreshCw,
   Sparkles,
+  Trash2,
   Wand2,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -18,15 +26,17 @@ import { StreamingViewer } from '@/components/editor/StreamingViewer';
 import { maxStep } from '@/components/layout/StepIndicator';
 import { Button } from '@/components/ui/button';
 import { Badge, Card } from '@/components/ui/card';
+import { Dialog } from '@/components/ui/dialog';
 import { ErrorNote } from '@/components/ui/ErrorNote';
-import { Input, Textarea } from '@/components/ui/field';
+import { Field, Input, Textarea } from '@/components/ui/field';
 import { SpeakButton, VoiceDictationButton } from '@/components/ui/VoiceTools';
 import { flushAllAutosaves } from '@/lib/autosaveRegistry';
-import type { Chapter, Project, Scene } from '@/lib/types';
+import { canWriteAll } from '@/lib/bookWork';
+import { toastError, toastSuccess } from '@/lib/toast';
+import type { Chapter, ChapterStatus, Project, Scene } from '@/lib/types';
 import { useAction } from '@/lib/useAction';
-import { toastError } from '@/lib/toast';
 import { useAutoSave } from '@/lib/useAutoSave';
-import { cn } from '@/lib/utils';
+import { cn, formatNumber } from '@/lib/utils';
 import { useProjectStore, type StepView } from '@/store/useProjectStore';
 
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -43,20 +53,39 @@ const DEFAULT_CHAPTERS = 5;
 const MIN_CHAPTERS = 1;
 const MAX_CHAPTERS = 60;
 
+const CHAPTER_STATUS_INFO: Record<ChapterStatus, { label: string; className: string }> = {
+  PENDING: { label: 'À rédiger', className: 'bg-surface text-muted' },
+  PLANNED: { label: 'À rédiger', className: 'bg-surface text-muted' },
+  GENERATING: { label: 'Écriture en cours…', className: 'bg-accent-soft text-accent' },
+  REVIEW: { label: 'Prêt à relire', className: 'bg-accent-soft text-accent' },
+  APPROVED: { label: 'Terminé et validé', className: 'bg-ok-soft text-ok' },
+  STALE: { label: 'À actualiser', className: 'bg-stale/15 text-stale' },
+  ERROR: { label: "Erreur d'écriture", className: 'bg-danger-soft text-danger' },
+};
+
 function clampChapters(n: number): number {
   if (!Number.isFinite(n)) return DEFAULT_CHAPTERS;
   return Math.min(MAX_CHAPTERS, Math.max(MIN_CHAPTERS, Math.round(n)));
 }
 
-function SimpleStepper({ status, active, onSelect }: { status: Project['status']; active: StepView; onSelect(s: StepView): void }) {
+export function SimpleStepper({
+  status,
+  active,
+  onSelect,
+}: {
+  status: Project['status'];
+  active: StepView;
+  onSelect(s: StepView): void;
+}) {
   const unlocked = maxStep(status);
   const currentView = active === 6 ? 5 : active;
   return (
-    <nav aria-label="Étapes de votre livre" className="border-b border-line bg-card px-4 py-3">
-      <div className="mx-auto flex max-w-4xl flex-wrap gap-2">
+    <nav aria-label="Étapes de votre livre" className="border-b border-line bg-card px-4 py-2.5">
+      <div className="mx-auto flex max-w-4xl flex-nowrap gap-2 overflow-x-auto">
         {SIMPLE_STEPS.map(({ view, label }) => {
           const enabled = view <= unlocked;
           const isCurrent = view === currentView;
+          const done = view < unlocked && !isCurrent;
           return (
             <button
               key={view}
@@ -65,15 +94,17 @@ function SimpleStepper({ status, active, onSelect }: { status: Project['status']
               aria-current={isCurrent ? 'step' : undefined}
               onClick={() => onSelect(view)}
               className={cn(
-                'flex cursor-pointer items-center gap-2 rounded-lg border-2 px-4 py-2.5 text-base font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+                'flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg border-2 px-3.5 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:text-base',
                 isCurrent
-                  ? 'border-accent bg-accent text-white'
-                  : enabled
-                    ? 'border-line bg-paper text-ink hover:border-accent/60 hover:bg-accent-soft'
-                    : 'border-line bg-paper text-muted',
+                  ? 'border-accent bg-accent-soft font-bold text-accent'
+                  : done
+                    ? 'border-ok/30 bg-paper text-ink hover:border-accent/60 hover:bg-accent-soft/60'
+                    : enabled
+                      ? 'border-line bg-paper text-ink hover:border-accent/60 hover:bg-accent-soft/60'
+                      : 'border-line bg-paper text-muted',
               )}
             >
-              {view < unlocked && !isCurrent && <Check size={18} className="text-ok" />}
+              {done && <Check size={16} className="text-ok" aria-hidden="true" />}
               {label}
             </button>
           );
@@ -86,6 +117,7 @@ function SimpleStepper({ status, active, onSelect }: { status: Project['status']
 function SimpleStep1({ project }: { project: Project }) {
   const job = useProjectStore((s) => s.activeJob);
   const setProject = useProjectStore((s) => s.setProject);
+  const setStep = useProjectStore((s) => s.setStep);
   const [form, setForm] = useState(() => ({
     title: project.title ?? '',
     language: project.language || 'fr',
@@ -98,6 +130,8 @@ function SimpleStep1({ project }: { project: Project }) {
   const [uploaded, setUploaded] = useState(
     project.reference_file ? 'Votre ancien livre est bien enregistré' : project.reference_meta ? 'Le style de votre ancien livre a été mémorisé' : '',
   );
+  const [showRef, setShowRef] = useState(Boolean(project.reference_file || project.reference_meta));
+  const [confirmReanalyze, setConfirmReanalyze] = useState(false);
   const { busy, error, run } = useAction();
   const save = useAutoSave<typeof form>((data) => pb.collection('projects').update(project.id, data));
   const running = job?.kind === 'ANALYZE';
@@ -126,69 +160,38 @@ function SimpleStep1({ project }: { project: Project }) {
       data.append('reference_file', file);
       setProject(await pb.collection('projects').update<Project>(project.id, data));
       setUploaded(`Livre fourni : ${file.name}`);
+      toastSuccess('Ancien livre enregistré.');
     });
   };
 
-  const canAnalyze = form.title.trim() && (form.raw_ideas.trim() || uploaded);
+  const launchAnalysis = () => {
+    setConfirmReanalyze(false);
+    void run(async () => {
+      await flushAllAutosaves();
+      await api.analyze(project.id);
+    });
+  };
+
+  const canAnalyze = Boolean(form.title.trim() && (form.raw_ideas.trim() || uploaded));
+  const alreadyAnalyzed = project.status !== 'STEP_1_INPUT';
+  const approxPages = Math.max(1, Math.round((form.target_chapter_count * form.target_words_per_chapter) / 250));
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4 sm:p-6">
       <Card className="space-y-4 p-6">
-        <h1 className="font-serif text-2xl font-bold">1. Le titre de votre nouveau livre</h1>
-        <p className="text-base text-muted">Vous pourrez le changer à tout moment.</p>
-        <Input
-          aria-label="Titre du livre"
-          className="h-14 text-lg font-medium"
-          value={form.title}
-          onChange={(e) => update({ title: e.target.value })}
-        />
-        <VoiceDictationButton
-          label="Dicter le titre au micro"
-          value={form.title}
-          onChange={(next) => update({ title: next })}
-        />
-      </Card>
-
-      <Card className="space-y-4 p-6">
-        <h2 className="font-serif text-2xl font-bold">2. Votre ancien livre (si vous en avez un)</h2>
-        <p className="text-base text-muted">
-          Si vous avez déjà écrit un livre par le passé (par exemple au format PDF ou Word), déposez-le ici : l'application va retrouver votre style d'écriture, vos personnages et votre histoire pour écrire la suite.
-        </p>
-        <label
-          className={cn(
-            'flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-3 border-dashed p-8 text-center transition-colors',
-            uploaded ? 'border-ok bg-ok/10 text-ok' : 'border-accent/50 bg-accent-soft/40 hover:bg-accent-soft',
-          )}
-        >
-          <FileUp size={36} className={uploaded ? 'text-ok' : 'text-accent'} />
-          <span className="text-lg font-semibold">
-            {uploaded || 'Cliquez ici pour choisir votre ancien livre (PDF, Word, EPUB ou Texte)'}
-          </span>
-          <span className="text-sm text-muted">
-            En déposant ce fichier, vous confirmez en être l'auteur. Il est supprimé automatiquement dès que l'analyse est terminée.
-          </span>
-          <input
-            type="file"
-            className="sr-only"
-            disabled={busy || running}
-            accept=".pdf,.docx,.epub,.txt"
-            onChange={(e) => onFile(e.target.files?.[0])}
-          />
-        </label>
-      </Card>
-
-      <Card className="space-y-4 p-6">
-        <h2 className="font-serif text-2xl font-bold">3. Racontez les grandes lignes de la suite</h2>
-        <p className="text-base text-muted">
-          Expliquez librement ce que vous voulez raconter dans ce nouveau livre : que deviennent vos personnages, où se passe l'histoire, et comment elle se termine. Vous pouvez parler au micro ou écrire au clavier.
-        </p>
-        <div className="flex flex-wrap gap-3">
+        <div className="space-y-1">
+          <h1 className="font-serif text-2xl font-bold">1. Racontez votre histoire</h1>
+          <p className="text-base text-muted">
+            Expliquez librement ce que vous voulez raconter dans ce livre : vos personnages, le cadre, les grands événements et comment l'histoire se termine.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
           <VoiceDictationButton
-            label="Parler dans le micro pour raconter l'histoire"
+            label="Parler dans le micro"
             value={form.raw_ideas}
             onChange={(next) => update({ raw_ideas: next })}
           />
-          {form.raw_ideas.trim() && <SpeakButton text={form.raw_ideas} label="Relire mes idées à voix haute" />}
+          {form.raw_ideas.trim() && <SpeakButton compact text={form.raw_ideas} label="Relire mes idées" />}
         </div>
         <Textarea
           aria-label="Vos idées pour le livre"
@@ -200,16 +203,18 @@ function SimpleStep1({ project }: { project: Project }) {
       </Card>
 
       <Card className="space-y-4 p-6">
-        <h2 className="font-serif text-xl font-bold">Combien de chapitres pour ce livre ?</h2>
-        <p className="text-base text-muted">
-          Indiquez le nombre de chapitres souhaité (entre {MIN_CHAPTERS} et {MAX_CHAPTERS}). Par défaut : {DEFAULT_CHAPTERS} chapitres.
-        </p>
-        <div className="flex items-center gap-3">
+        <div className="space-y-1">
+          <h2 className="font-serif text-xl font-bold">2. Longueur du livre</h2>
+          <p className="text-base text-muted">
+            Choisissez le nombre de chapitres souhaité (entre {MIN_CHAPTERS} et {MAX_CHAPTERS}). Par défaut : {DEFAULT_CHAPTERS} chapitres.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
           <Button
             type="button"
             variant="secondary"
             aria-label="Un chapitre de moins"
-            className="h-14 w-14 text-2xl font-bold"
+            className="min-h-12 w-12 text-xl font-bold"
             disabled={chaptersInput !== '' && Number(chaptersInput) <= MIN_CHAPTERS}
             onClick={() => setChapters(clampChapters((Number(chaptersInput) || DEFAULT_CHAPTERS) - 1))}
           >
@@ -222,7 +227,7 @@ function SimpleStep1({ project }: { project: Project }) {
             min={MIN_CHAPTERS}
             max={MAX_CHAPTERS}
             step={1}
-            className="h-14 w-28 text-center text-2xl font-bold"
+            className="h-12 w-24 text-center text-xl font-bold"
             value={chaptersInput}
             onChange={(e) => {
               const raw = e.target.value;
@@ -238,53 +243,164 @@ function SimpleStep1({ project }: { project: Project }) {
             type="button"
             variant="secondary"
             aria-label="Un chapitre de plus"
-            className="h-14 w-14 text-2xl font-bold"
+            className="min-h-12 w-12 text-xl font-bold"
             disabled={Number(chaptersInput) >= MAX_CHAPTERS}
             onClick={() => setChapters(clampChapters((Number(chaptersInput) || DEFAULT_CHAPTERS) + 1))}
           >
             +
           </Button>
-          <span className="text-lg">chapitres</span>
+          <span className="text-base font-medium text-ink">
+            {form.target_chapter_count > 1 ? 'chapitres' : 'chapitre'}{' '}
+            <span className="text-muted">(environ {formatNumber(approxPages)} pages)</span>
+          </span>
         </div>
+      </Card>
+
+      <Card className="p-5">
+        <button
+          type="button"
+          aria-expanded={showRef}
+          onClick={() => setShowRef((v) => !v)}
+          className="flex w-full cursor-pointer items-center justify-between gap-3 text-left"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-serif text-lg font-bold">C'est la suite d'un livre existant ? (facultatif)</span>
+            {uploaded && <Badge className="bg-ok-soft text-ok">Ancien livre enregistré ✓</Badge>}
+          </div>
+          {showRef ? <ChevronUp size={20} className="shrink-0 text-muted" /> : <ChevronDown size={20} className="shrink-0 text-muted" />}
+        </button>
+
+        {showRef && (
+          <div className="mt-4 space-y-3 border-t border-line pt-4">
+            <p className="text-base text-muted">
+              Si vous avez déjà écrit un livre (PDF, Word, EPUB ou Texte), déposez-le ici : l'application retrouvera votre style d'écriture, vos personnages et votre histoire.
+            </p>
+            <label
+              className={cn(
+                'flex cursor-pointer flex-col items-center justify-center gap-2.5 rounded-xl border-2 border-dashed p-6 text-center transition-colors',
+                uploaded ? 'border-ok bg-ok-soft/60 text-ok' : 'border-accent/45 bg-accent-soft/40 hover:bg-accent-soft',
+              )}
+            >
+              <FileUp size={30} className={uploaded ? 'text-ok' : 'text-accent'} />
+              <span className="text-base font-semibold">
+                {uploaded || 'Cliquez ici pour choisir votre ancien livre (PDF, Word, EPUB ou Texte)'}
+              </span>
+              <span className="text-xs text-muted">
+                {uploaded
+                  ? 'Cliquez à nouveau sur cette zone pour remplacer le fichier. Il est supprimé après analyse.'
+                  : "En déposant ce fichier, vous confirmez en être l'auteur. Il est supprimé automatiquement après l'analyse."}
+              </span>
+              <input
+                type="file"
+                className="sr-only"
+                disabled={busy || running}
+                accept=".pdf,.docx,.epub,.txt"
+                onChange={(e) => onFile(e.target.files?.[0])}
+              />
+            </label>
+          </div>
+        )}
+      </Card>
+
+      <Card className="space-y-3 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-serif text-lg font-bold">Titre du livre</h2>
+          <VoiceDictationButton
+            compact
+            label="Dicter le titre"
+            value={form.title}
+            onChange={(next) => update({ title: next })}
+          />
+        </div>
+        <Input
+          aria-label="Titre du livre"
+          className="h-12 text-lg font-medium"
+          value={form.title}
+          onChange={(e) => update({ title: e.target.value })}
+        />
       </Card>
 
       <ErrorNote error={error} />
 
-      <div className="flex justify-end pt-2">
-        <Button
-          disabled={!canAnalyze || busy || running}
-          className="h-16 w-full px-8 text-xl font-bold sm:w-auto"
-          onClick={() =>
-            void run(async () => {
-              await flushAllAutosaves();
-              await api.analyze(project.id);
-            })
-          }
-        >
-          <Sparkles size={24} />
-          {running ? 'Préparation de votre histoire en cours…' : 'Étape suivante : Préparer le résumé de mon histoire'}
-        </Button>
+      <div className="space-y-3 pt-1">
+        {!canAnalyze && (
+          <p className="text-sm text-muted">
+            {!form.title.trim()
+              ? 'Indiquez un titre pour votre livre ci-dessus afin de continuer.'
+              : 'Racontez quelques idées ci-dessus (ou déposez votre ancien livre) pour passer à la suite.'}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {alreadyAnalyzed ? (
+            <>
+              <Button
+                variant="secondary"
+                size="lg"
+                disabled={!canAnalyze || busy || running}
+                onClick={() => setConfirmReanalyze(true)}
+              >
+                <RefreshCw size={18} /> Relancer l'analyse
+              </Button>
+              <Button variant="primary" size="xl" className="w-full sm:w-auto" onClick={() => setStep(2)}>
+                Voir le résumé <ArrowRight size={20} />
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="primary"
+              size="xl"
+              disabled={!canAnalyze || busy || running}
+              loading={running}
+              className="ml-auto w-full sm:w-auto"
+              onClick={launchAnalysis}
+            >
+              {!running && <Sparkles size={20} />}
+              {running ? 'Préparation du résumé…' : 'Préparer le résumé'}
+              {!running && <ArrowRight size={20} />}
+            </Button>
+          )}
+        </div>
       </div>
+
+      <Dialog
+        open={confirmReanalyze}
+        onOpenChange={setConfirmReanalyze}
+        title="Relancer l'analyse de votre histoire ?"
+        description="Le résumé actuel et la liste des personnages seront remplacés par une nouvelle proposition."
+      >
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" onClick={() => setConfirmReanalyze(false)}>
+            Annuler
+          </Button>
+          <Button variant="primary" onClick={launchAnalysis}>
+            Relancer l'analyse
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
 
 function SimpleStep2({ project }: { project: Project }) {
+  const setStep = useProjectStore((s) => s.setStep);
   const [feedback, setFeedback] = useState('');
+  const [showEditDrawer, setShowEditDrawer] = useState(false);
   const { busy, doing, error, run } = useAction();
   const save = useAutoSave<string>((reformulated_concept) => pb.collection('projects').update(project.id, { reformulated_concept }));
   const job = useProjectStore((s) => s.activeJob);
   const running = job !== null;
+  const outlining = job?.kind === 'OUTLINE';
   const refMemory = project.reference_meta?.story_memory;
   const characters = project.story_bible?.characters ?? [];
+  const drawerVisible = showEditDrawer || feedback.trim().length > 0;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4 sm:p-6">
       {refMemory && (
-        <Card className="space-y-3 border-2 border-accent/30 bg-accent-soft/40 p-6">
+        <Card className="space-y-3 border-2 border-accent/25 bg-accent-soft/40 p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="font-serif text-xl font-bold">Ce que nous avons retenu de votre ancien livre</h2>
-            <SpeakButton text={`${refMemory.summary}. ${refMemory.ending_state}`} label="Écouter ce rappel" />
+            <h2 className="font-serif text-lg font-bold">Ce que nous avons retenu de votre ancien livre</h2>
+            <SpeakButton compact text={`${refMemory.summary}. ${refMemory.ending_state}`} label="Écouter ce rappel" />
           </div>
           <p className="text-base leading-relaxed">{refMemory.summary}</p>
           {refMemory.ending_state && (
@@ -297,16 +413,98 @@ function SimpleStep2({ project }: { project: Project }) {
 
       <Card className="space-y-4 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="font-serif text-2xl font-bold">Le résumé de votre nouvelle histoire</h1>
-          <SpeakButton text={project.reformulated_concept} label="Écouter le résumé" />
+          <h1 className="font-serif text-2xl font-bold">Le résumé de votre histoire</h1>
+          <SpeakButton compact text={project.reformulated_concept} label="Écouter le résumé" />
         </div>
-        <p className="text-base text-muted">
-          Voici le fil conducteur préparé à partir de votre ancien livre et de vos idées. Vous pouvez le corriger directement dans le texte ci-dessous, ou demander une modification au micro plus bas.
+        <p className="text-sm text-muted">
+          Vous pouvez cliquer directement dans le texte ci-dessous pour le corriger, ou demander un changement à l'application.
         </p>
         <div className="rounded-lg border border-line bg-paper p-4">
           <RichTextEditor value={project.reformulated_concept} onChange={save} ariaLabel="Résumé de votre histoire" />
         </div>
       </Card>
+
+      <ErrorNote error={error} />
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="ghost" size="lg" onClick={() => setStep(1)}>
+            <ArrowLeft size={18} /> Retour
+          </Button>
+          <Button
+            variant="secondary"
+            size="lg"
+            aria-expanded={drawerVisible}
+            onClick={() => setShowEditDrawer((v) => !v)}
+          >
+            <PenLine size={18} /> Demander un changement
+          </Button>
+        </div>
+
+        <Button
+          variant="success"
+          size="xl"
+          disabled={busy || running}
+          loading={doing === 'outline'}
+          className="w-full sm:w-auto"
+          onClick={() =>
+            void run(async () => {
+              await flushAllAutosaves();
+              await api.outline(project.id);
+            }, 'outline')
+          }
+        >
+          {doing !== 'outline' && !outlining && <Check size={20} />}
+          {doing === 'outline' || outlining ? 'Création des chapitres…' : 'Créer les chapitres'}
+          {doing !== 'outline' && !outlining && <ArrowRight size={20} />}
+        </Button>
+      </div>
+
+      {drawerVisible && (
+        <Card className="space-y-4 border-accent/30 bg-accent-soft/25 p-5">
+          <div className="space-y-1">
+            <h2 className="font-serif text-lg font-bold">Que souhaitez-vous modifier dans ce résumé ?</h2>
+            <p className="text-sm text-muted">
+              Dictez au micro ou écrivez vos indications (par exemple : « Change la fin », « Ajoute le personnage de mon frère Paul »).
+            </p>
+          </div>
+          <VoiceDictationButton
+            compact
+            label="Dicter ma demande"
+            value={feedback}
+            onChange={setFeedback}
+          />
+          <Textarea
+            aria-label="Vos consignes pour modifier le résumé"
+            className="min-h-24 text-base"
+            placeholder="Écrivez ou dictez ici ce que vous souhaitez changer…"
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+          />
+          <div className="flex flex-wrap justify-end gap-2">
+            {!feedback.trim() && (
+              <Button variant="ghost" onClick={() => setShowEditDrawer(false)}>
+                Fermer
+              </Button>
+            )}
+            <Button
+              variant="primary"
+              size="lg"
+              disabled={busy || running || !feedback.trim()}
+              onClick={() =>
+                void run(async () => {
+                  await flushAllAutosaves();
+                  await api.analyze(project.id, feedback.trim());
+                  setFeedback('');
+                  setShowEditDrawer(false);
+                })
+              }
+            >
+              <RefreshCw size={18} /> Refaire le résumé
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {characters.length > 0 && (
         <Card className="space-y-3 p-6">
@@ -321,65 +519,33 @@ function SimpleStep2({ project }: { project: Project }) {
           </ul>
         </Card>
       )}
-
-      <Card className="space-y-4 p-6">
-        <h2 className="font-serif text-xl font-bold">Vous voulez modifier quelque chose ?</h2>
-        <p className="text-base text-muted">
-          Dites au micro ou écrivez ce qu'il faut changer (par exemple : « Change la fin », « Ajoute le personnage de mon frère Paul »).
-        </p>
-        <VoiceDictationButton
-          label="Dicter ma demande au micro"
-          value={feedback}
-          onChange={setFeedback}
-        />
-        <Textarea
-          aria-label="Vos consignes pour modifier le résumé"
-          className="min-h-24 text-base"
-          placeholder="Écrivez ou dictez ici ce que vous souhaitez changer…"
-          value={feedback}
-          onChange={(e) => setFeedback(e.target.value)}
-        />
-        <Button
-          variant="secondary"
-          disabled={busy || running || !feedback.trim()}
-          className="h-12 px-6 text-base font-semibold"
-          onClick={() =>
-            void run(async () => {
-              await flushAllAutosaves();
-              await api.analyze(project.id, feedback.trim());
-              setFeedback('');
-            })
-          }
-        >
-          <RefreshCw size={18} /> Refaire le résumé avec mes indications
-        </Button>
-      </Card>
-
-      <ErrorNote error={error} />
-
-      <div className="flex justify-end pt-2">
-        <Button
-          disabled={busy || running}
-          loading={doing === 'outline'}
-          className="h-16 w-full px-8 text-xl font-bold sm:w-auto"
-          onClick={() =>
-            void run(async () => {
-              await flushAllAutosaves();
-              await api.outline(project.id);
-            }, 'outline')
-          }
-        >
-          {doing === 'outline' ? 'Création des chapitres en cours…' : 'Ce résumé me convient : Créer le plan des chapitres'}
-          <ArrowRight size={22} />
-        </Button>
-      </div>
     </div>
   );
 }
 
-function SimpleChapterItem({ chapter }: { chapter: Chapter }) {
+function SimpleChapterItem({
+  chapter,
+  index,
+  total,
+  locked,
+  onMove,
+  onDelete,
+}: {
+  chapter: Chapter;
+  index: number;
+  total: number;
+  locked: boolean;
+  onMove(dir: -1 | 1): void;
+  onDelete(): void;
+}) {
   const [form, setForm] = useState({ title: chapter.title, brief_summary: chapter.brief_summary });
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const save = useAutoSave<Partial<Chapter>>((data) => pb.collection('chapters').update(chapter.id, data));
+  const pending = chapter.status === 'PENDING';
+
+  useEffect(() => {
+    setForm({ title: chapter.title, brief_summary: chapter.brief_summary });
+  }, [chapter.title, chapter.brief_summary]);
 
   const update = (patch: Partial<typeof form>) => {
     const next = { ...form, ...patch };
@@ -391,24 +557,88 @@ function SimpleChapterItem({ chapter }: { chapter: Chapter }) {
     <Card className="space-y-3 p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-serif text-xl font-bold text-accent">Chapitre {chapter.chapter_number}</span>
-        <VoiceDictationButton
-          label="Dicter la suite de ce chapitre"
-          value={form.brief_summary}
-          onChange={(next) => update({ brief_summary: next })}
-        />
+        <div className="flex flex-wrap items-center gap-1.5">
+          {pending && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Monter le chapitre ${chapter.chapter_number}`}
+                title="Monter"
+                disabled={locked || index === 0}
+                onClick={() => onMove(-1)}
+              >
+                <ArrowUp size={16} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Descendre le chapitre ${chapter.chapter_number}`}
+                title="Descendre"
+                disabled={locked || index >= total - 1}
+                onClick={() => onMove(1)}
+              >
+                <ArrowDown size={16} />
+              </Button>
+            </>
+          )}
+          <VoiceDictationButton
+            compact
+            label="Dicter"
+            value={form.brief_summary}
+            onChange={(next) => update({ brief_summary: next })}
+          />
+          {pending && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`Supprimer le chapitre ${chapter.chapter_number}`}
+              title="Supprimer ce chapitre"
+              className="text-muted hover:bg-danger/10 hover:text-danger"
+              disabled={locked}
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 size={16} />
+            </Button>
+          )}
+        </div>
       </div>
-      <Input
-        aria-label={`Titre du chapitre ${chapter.chapter_number}`}
-        className="h-12 text-lg font-semibold"
-        value={form.title}
-        onChange={(e) => update({ title: e.target.value })}
-      />
-      <Textarea
-        aria-label={`Résumé du chapitre ${chapter.chapter_number}`}
-        className="min-h-24 text-base leading-relaxed"
-        value={form.brief_summary}
-        onChange={(e) => update({ brief_summary: e.target.value })}
-      />
+      <Field label="Titre du chapitre">
+        <Input
+          className="h-11 text-base font-semibold"
+          value={form.title}
+          onChange={(e) => update({ title: e.target.value })}
+        />
+      </Field>
+      <Field label="Ce qui se passe dans ce chapitre">
+        <Textarea
+          className="min-h-24 text-base leading-relaxed"
+          value={form.brief_summary}
+          onChange={(e) => update({ brief_summary: e.target.value })}
+        />
+      </Field>
+
+      <Dialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={`Supprimer le Chapitre ${chapter.chapter_number} ?`}
+        description={`« ${form.title || 'Sans titre'} » sera retiré du plan de votre livre.`}
+      >
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" onClick={() => setConfirmDelete(false)}>
+            Annuler
+          </Button>
+          <Button
+            variant="dangerSolid"
+            onClick={() => {
+              setConfirmDelete(false);
+              onDelete();
+            }}
+          >
+            Supprimer
+          </Button>
+        </div>
+      </Dialog>
     </Card>
   );
 }
@@ -416,67 +646,159 @@ function SimpleChapterItem({ chapter }: { chapter: Chapter }) {
 function SimpleStep3({ project }: { project: Project }) {
   const chapters = useProjectStore((s) => s.chapters);
   const loadChapters = useProjectStore((s) => s.loadChapters);
+  const setStep = useProjectStore((s) => s.setStep);
   const job = useProjectStore((s) => s.activeJob);
   const [feedback, setFeedback] = useState('');
+  const [newTitle, setNewTitle] = useState('');
+  const [showPlanDrawer, setShowPlanDrawer] = useState(false);
   const { busy, doing, error, run } = useAction();
 
   const fullOutlineText = chapters.map((c) => `Chapitre ${c.chapter_number}, ${c.title}. ${c.brief_summary}`).join('\n\n');
+  const drawerVisible = showPlanDrawer || feedback.trim().length > 0;
+  const pendingIds = chapters.filter((c) => c.status === 'PENDING').map((c) => c.id);
+
+  const moveChapter = (chapterId: string, dir: -1 | 1) => {
+    const from = pendingIds.indexOf(chapterId);
+    const to = from + dir;
+    if (from < 0 || to < 0 || to >= pendingIds.length) return;
+    const next = [...pendingIds];
+    [next[from], next[to]] = [next[to], next[from]];
+    void run(async () => {
+      await flushAllAutosaves();
+      await api.reorder(project.id, next);
+      await loadChapters();
+    });
+  };
+
+  const deleteChapter = (chapterId: string) => {
+    void run(async () => {
+      await flushAllAutosaves();
+      await api.deleteChapter(chapterId);
+      await loadChapters();
+      toastSuccess('Chapitre retiré du plan.');
+    });
+  };
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4 sm:p-6">
-      <Card className="space-y-3 p-6">
+      <Card className="space-y-2 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="font-serif text-2xl font-bold">Le plan de vos {chapters.length} chapitres</h1>
-          <SpeakButton text={fullOutlineText} label="Écouter tout le plan" />
+          <SpeakButton compact text={fullOutlineText} label="Écouter le plan" />
         </div>
         <p className="text-base text-muted">
-          Voici le découpage de votre livre chapitre par chapitre. Vous pouvez retoucher directement un chapitre ou demander un changement général en bas de la page.
+          Voici le découpage de votre livre. Vous pouvez retoucher directement un chapitre, changer l'ordre avec les flèches, ou demander un ajustement général.
         </p>
       </Card>
 
       <div className="space-y-4">
-        {chapters.map((c) => (
-          <SimpleChapterItem key={c.id} chapter={c} />
+        {chapters.map((c, idx) => (
+          <SimpleChapterItem
+            key={c.id}
+            chapter={c}
+            index={idx}
+            total={chapters.length}
+            locked={busy || job !== null}
+            onMove={(dir) => moveChapter(c.id, dir)}
+            onDelete={() => deleteChapter(c.id)}
+          />
         ))}
       </div>
 
-      <Card className="space-y-4 p-6">
-        <h2 className="font-serif text-xl font-bold">Demander une modification du plan</h2>
-        <VoiceDictationButton
-          label="Dicter ma demande au micro"
-          value={feedback}
-          onChange={setFeedback}
+      <form
+        className="flex flex-wrap gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!newTitle.trim()) return;
+          void run(async () => {
+            await flushAllAutosaves();
+            await api.addChapter(project.id, newTitle.trim());
+            setNewTitle('');
+            await loadChapters();
+            toastSuccess('Chapitre ajouté.');
+          });
+        }}
+      >
+        <Input
+          aria-label="Titre du nouveau chapitre"
+          className="min-w-48 flex-1"
+          placeholder="Titre d'un nouveau chapitre à ajouter…"
+          value={newTitle}
+          onChange={(e) => setNewTitle(e.target.value)}
         />
-        <Textarea
-          aria-label="Consignes pour modifier le plan"
-          placeholder="Par exemple : « Ajoute un chapitre sur son enfance au village »…"
-          value={feedback}
-          onChange={(e) => setFeedback(e.target.value)}
-        />
-        <Button
-          variant="secondary"
-          disabled={busy || !feedback.trim()}
-          loading={doing === 'outline'}
-          className="h-12 px-6 text-base font-semibold"
-          onClick={() =>
-            void run(async () => {
-              await flushAllAutosaves();
-              await api.outline(project.id, feedback.trim());
-              setFeedback('');
-              await loadChapters();
-            }, 'outline')
-          }
-        >
-          <RefreshCw size={18} /> Refaire le plan avec mes indications
+        <Button type="submit" variant="secondary" disabled={busy || !newTitle.trim()}>
+          <Plus size={16} /> Ajouter un chapitre
         </Button>
-      </Card>
+      </form>
+
+      {drawerVisible && (
+        <Card className="space-y-4 border-accent/30 bg-accent-soft/25 p-5">
+          <div className="space-y-1">
+            <h2 className="font-serif text-lg font-bold">Demander une modification du plan</h2>
+            <p className="text-sm text-muted">
+              Les chapitres que vous avez déjà retouchés seront conservés.
+            </p>
+          </div>
+          <VoiceDictationButton
+            compact
+            label="Dicter ma demande"
+            value={feedback}
+            onChange={setFeedback}
+          />
+          <Textarea
+            aria-label="Consignes pour modifier le plan"
+            placeholder="Par exemple : « Ajoute un chapitre sur son enfance au village »…"
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+          />
+          <div className="flex flex-wrap justify-end gap-2">
+            {!feedback.trim() && (
+              <Button variant="ghost" onClick={() => setShowPlanDrawer(false)}>
+                Fermer
+              </Button>
+            )}
+            <Button
+              variant="primary"
+              size="lg"
+              disabled={busy || job !== null || !feedback.trim()}
+              loading={doing === 'outline' || job?.kind === 'OUTLINE'}
+              onClick={() =>
+                void run(async () => {
+                  await flushAllAutosaves();
+                  await api.outline(project.id, feedback.trim());
+                  setFeedback('');
+                  setShowPlanDrawer(false);
+                }, 'outline')
+              }
+            >
+              {doing !== 'outline' && <RefreshCw size={18} />} Refaire le plan
+            </Button>
+          </div>
+        </Card>
+      )}
 
       <ErrorNote error={error} />
 
-      <div className="flex justify-end pt-2">
+      <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-card/95 p-3 shadow-md backdrop-blur">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="ghost" size="lg" onClick={() => setStep(2)}>
+            <ArrowLeft size={18} /> Résumé
+          </Button>
+          <Button
+            variant="secondary"
+            size="lg"
+            aria-expanded={drawerVisible}
+            onClick={() => setShowPlanDrawer((v) => !v)}
+          >
+            <PenLine size={18} /> Modifier le plan
+          </Button>
+        </div>
+
         <Button
+          variant="primary"
+          size="xl"
           disabled={busy || job !== null || chapters.length === 0}
-          className="h-16 w-full px-8 text-xl font-bold sm:w-auto"
+          className="w-full sm:w-auto"
           onClick={() =>
             void run(async () => {
               await flushAllAutosaves();
@@ -484,7 +806,7 @@ function SimpleStep3({ project }: { project: Project }) {
             })
           }
         >
-          Ce plan me convient : Écrire les premières pages <ArrowRight size={22} />
+          Écrire les premières pages <ArrowRight size={20} />
         </Button>
       </div>
     </div>
@@ -493,21 +815,31 @@ function SimpleStep3({ project }: { project: Project }) {
 
 function SimpleStep4({ project }: { project: Project }) {
   const job = useProjectStore((s) => s.activeJob);
+  const setStep = useProjectStore((s) => s.setStep);
+  const [confirmRetry, setConfirmRetry] = useState(false);
   const { busy, doing, error, run } = useAction();
   const save = useAutoSave<string>((sample_text) => pb.collection('projects').update(project.id, { sample_text }));
   const generating = job?.kind === 'SAMPLE';
   const canApprove = project.status === 'STEP_4_SAMPLE_REVIEW';
+
+  const retrySample = () => {
+    setConfirmRetry(false);
+    void run(async () => {
+      await flushAllAutosaves();
+      await api.sample(project.id);
+    });
+  };
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4 sm:p-6">
       <Card className="space-y-4 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="font-serif text-2xl font-bold">Vos premières pages</h1>
-          {!generating && <SpeakButton text={project.sample_text} label="Écouter ces pages" />}
+          {!generating && <SpeakButton compact text={project.sample_text} label="Écouter ces pages" />}
         </div>
-        <p className="text-base text-muted">
-          Lisez ou écoutez ce début du premier chapitre pour vérifier que le ton et le style d'écriture vous plaisent. Vous pouvez corriger le texte librement.
-        </p>
+        <div className="rounded-lg border border-accent/25 bg-accent-soft/40 p-3.5 text-base text-ink">
+          Lisez ou écoutez ce début. Corrigez librement le texte ci-dessous : vos retouches apprennent votre style à l'application.
+        </div>
         <div className="rounded-lg border border-line bg-paper p-5">
           {generating ? (
             <StreamingViewer text={project.sample_draft} label="première scène" />
@@ -519,37 +851,62 @@ function SimpleStep4({ project }: { project: Project }) {
 
       <ErrorNote error={error} />
 
-      <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
-        <Button
-          variant="secondary"
-          disabled={busy || generating}
-          className="h-14 px-6 text-base font-semibold"
-          onClick={() =>
-            void run(async () => {
-              await flushAllAutosaves();
-              await api.sample(project.id);
-            })
-          }
-        >
-          <RefreshCw size={18} /> Proposer un autre début
-        </Button>
-
-        {canApprove && (
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="ghost" size="lg" onClick={() => setStep(3)}>
+            <ArrowLeft size={18} /> Chapitres
+          </Button>
           <Button
+            variant="secondary"
+            size="lg"
+            disabled={busy || generating}
+            onClick={() => setConfirmRetry(true)}
+          >
+            <RefreshCw size={18} /> Autre essai
+          </Button>
+        </div>
+
+        {canApprove ? (
+          <Button
+            variant="success"
+            size="xl"
             disabled={busy || generating}
             loading={doing === 'approve'}
-            className="h-16 flex-1 px-8 text-xl font-bold sm:flex-initial"
+            className="w-full sm:w-auto"
             onClick={() =>
               void run(async () => {
                 await flushAllAutosaves();
                 await api.approveSample(project.id);
+                toastSuccess('Style validé !');
               }, 'approve')
             }
           >
-            <Check size={22} /> {doing === 'approve' ? 'Validation…' : 'Ce style me convient : Écrire la suite du livre'}
+            {doing !== 'approve' && <Check size={20} />}
+            {doing === 'approve' ? 'Validation…' : 'Valider ce style'}
+            {doing !== 'approve' && <ArrowRight size={20} />}
+          </Button>
+        ) : (
+          <Button variant="primary" size="xl" className="w-full sm:w-auto" onClick={() => setStep(5)}>
+            Continuer vers mon livre <ArrowRight size={20} />
           </Button>
         )}
       </div>
+
+      <Dialog
+        open={confirmRetry}
+        onOpenChange={setConfirmRetry}
+        title="Proposer un autre début ?"
+        description="Le texte actuel de ces premières pages (ainsi que vos éventuelles corrections) sera remplacé."
+      >
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" onClick={() => setConfirmRetry(false)}>
+            Annuler
+          </Button>
+          <Button variant="primary" onClick={retrySample}>
+            Proposer un autre début
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
@@ -559,9 +916,9 @@ function SimpleSceneItem({ scene, showPartHeader }: { scene: Scene; showPartHead
   return (
     <div className="space-y-3 rounded-xl border border-line bg-paper p-5">
       {showPartHeader && (
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-sm font-semibold text-muted">Partie {scene.scene_number}</span>
-          {scene.content.trim() && <SpeakButton text={scene.content} label={`Écouter la partie ${scene.scene_number}`} />}
+          {scene.content.trim() && <SpeakButton compact text={scene.content} label={`Écouter partie ${scene.scene_number}`} />}
         </div>
       )}
       {scene.status === 'GENERATING' && <StreamingViewer text={scene.draft} />}
@@ -586,12 +943,20 @@ function SimpleStep5Book({ project }: { project: Project }) {
   const loadScenes = useProjectStore((s) => s.loadScenes);
   const { busy, doing, error, run } = useAction();
   const [dictatedChange, setDictatedChange] = useState('');
+  const [showRewrite, setShowRewrite] = useState(false);
+  const [confirmRewrite, setConfirmRewrite] = useState(false);
+  const [confirmWriteAll, setConfirmWriteAll] = useState(false);
 
   useEffect(() => {
     if (activeId && chapters.some((c) => c.id === activeId)) return;
     const next = chapters.find((c) => c.status !== 'APPROVED') ?? chapters[0];
     if (next) setActive(next.id);
   }, [activeId, chapters, setActive]);
+
+  useEffect(() => {
+    setShowRewrite(false);
+    setDictatedChange('');
+  }, [activeId]);
 
   useEffect(() => {
     if (activeId) loadScenes(activeId).catch(() => toastError('Impossible de charger les scènes de ce chapitre.'));
@@ -605,82 +970,134 @@ function SimpleStep5Book({ project }: { project: Project }) {
 
   const running = job !== null;
   const remainingChapters = chapters.filter((c) => c.status !== 'APPROVED').length;
+  const reviewCount = chapters.filter((c) => c.status === 'REVIEW').length;
+  const approvedCount = chapters.length - remainingChapters;
+  const allDone = chapters.length > 0 && remainingChapters === 0;
   const writtenCount = chapters.filter((c) => c.status === 'APPROVED' || c.status === 'REVIEW').length;
+  const writeAllUseful = canWriteAll(chapters);
+  const progressPct = chapters.length > 0 ? Math.round((approvedCount / chapters.length) * 100) : 0;
+
   const chapterFullText = scenes
     .map((s) => s.content.trim())
     .filter(Boolean)
     .join('\n\n');
   const hasPendingScenes = scenes.some((s) => s.status === 'PENDING');
+  const hasWrittenScene = scenes.some((s) => s.status === 'REVIEW');
   const allReview = scenes.length > 0 && scenes.every((s) => s.status === 'REVIEW');
   const blockedByPrevious = previous && previous.status !== 'APPROVED';
 
+  const exportFile = (format: 'docx' | 'epub') => {
+    void run(async () => {
+      await flushAllAutosaves();
+      await api.exportBook(project.id, format, false);
+      toastSuccess('Téléchargement lancé !');
+    });
+  };
+
+  const rewriteCurrentChapter = () => {
+    if (!chapter) return;
+    setConfirmRewrite(false);
+    void run(async () => {
+      await flushAllAutosaves();
+      if (dictatedChange.trim()) {
+        const baseSummary = chapter.brief_summary.replace(/\n\nConsigne de l'auteur :[\s\S]*$/, '').trimEnd();
+        await pb.collection('chapters').update(chapter.id, {
+          brief_summary: `${baseSummary}\n\nConsigne de l'auteur : ${dictatedChange.trim()}`,
+        });
+        setDictatedChange('');
+      }
+      setShowRewrite(false);
+      await api.rewriteChapter(chapter.id);
+    }, 'rewrite');
+  };
+
   return (
     <div className="mx-auto max-w-4xl space-y-6 p-4 sm:p-6">
-      {remainingChapters > 0 && !running && (
-        <Card className="flex flex-wrap items-center justify-between gap-4 border-2 border-accent/40 bg-accent-soft/50 p-6">
-          <div className="space-y-1">
-            <h2 className="font-serif text-xl font-bold">Écrire tout le livre automatiquement</h2>
-            <p className="text-base text-muted">
-              Il reste {remainingChapters} {remainingChapters > 1 ? 'chapitres' : 'chapitre'} à terminer. L'application peut rédiger toute la suite d'un seul coup.
-            </p>
+      {allDone && (
+        <Card className="space-y-4 border-2 border-ok/40 bg-ok-soft/60 p-6">
+          <div className="flex items-start gap-3">
+            <BookOpen className="mt-1 shrink-0 text-ok" size={28} />
+            <div className="space-y-1">
+              <h2 className="font-serif text-2xl font-bold text-ink">
+                Félicitations, votre livre « {project.title} » est terminé !
+              </h2>
+              <p className="text-base text-muted">
+                Tous vos chapitres sont validés. Téléchargez votre manuscrit mis en page pour l'imprimer ou le lire sur tablette.
+              </p>
+            </div>
           </div>
-          <Button
-            disabled={busy}
-            loading={doing === 'write-all'}
-            className="h-14 px-6 text-lg font-bold"
-            onClick={() =>
-              void run(async () => {
-                await flushAllAutosaves();
-                await api.writeAll(project.id);
-              }, 'write-all')
-            }
-          >
-            <Wand2 size={20} /> Écrire tout le reste du livre
-          </Button>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button variant="primary" size="lg" disabled={busy} onClick={() => exportFile('docx')}>
+              <Download size={20} /> Imprimer / Word (.docx)
+            </Button>
+            <Button variant="secondary" size="lg" disabled={busy} onClick={() => exportFile('epub')}>
+              <Download size={20} /> Liseuse / Tablette (.epub)
+            </Button>
+          </div>
         </Card>
       )}
 
       <Card className="space-y-4 p-5">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">Choisir un chapitre ({chapters.length - remainingChapters} sur {chapters.length} terminés)</h2>
-          <div className="flex gap-2">
-            <Button
-              variant="secondary"
-              disabled={!prevChapter}
-              onClick={() => prevChapter && setActive(prevChapter.id)}
-              className="h-11 px-4 text-base"
-            >
-              <ArrowLeft size={18} /> Précédent
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={!nextChapter}
-              onClick={() => nextChapter && setActive(nextChapter.id)}
-              className="h-11 px-4 text-base"
-            >
-              Suivant <ArrowRight size={18} />
-            </Button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">
+              Progression : {approvedCount} sur {chapters.length} chapitres validés
+            </h2>
+            <p className="text-xs tabular-nums text-muted">{progressPct} % du livre terminé</p>
           </div>
+          {writeAllUseful && !running && (
+            <Button
+              variant="secondary"
+              size="md"
+              disabled={busy}
+              loading={doing === 'write-all'}
+              onClick={() => setConfirmWriteAll(true)}
+            >
+              <Wand2 size={18} /> Tout écrire automatiquement
+            </Button>
+          )}
         </div>
+
+        <div className="h-2.5 w-full overflow-hidden rounded-full bg-surface" aria-hidden="true">
+          <div className="h-full rounded-full bg-ok transition-[width] duration-300" style={{ width: `${progressPct}%` }} />
+        </div>
+
         <div className="flex flex-wrap gap-2">
           {chapters.map((c) => {
             const isCurrent = c.id === activeId;
             const isDone = c.status === 'APPROVED';
+            const isReview = c.status === 'REVIEW';
+            const isStale = c.status === 'STALE';
+            const isError = c.status === 'ERROR';
             return (
               <button
                 key={c.id}
                 type="button"
                 onClick={() => setActive(c.id)}
                 className={cn(
-                  'cursor-pointer rounded-lg border-2 px-4 py-2 text-base font-semibold transition-colors',
+                  'flex max-w-56 cursor-pointer items-center gap-2 rounded-lg border-2 px-3.5 py-2 text-left text-sm font-semibold transition-colors',
                   isCurrent
-                    ? 'border-accent bg-accent text-white'
+                    ? 'border-accent bg-accent-soft text-accent'
                     : isDone
-                      ? 'border-ok/40 bg-ok/10 text-ok hover:bg-ok/20'
-                      : 'border-line bg-paper text-ink hover:bg-accent-soft',
+                      ? 'border-ok/35 bg-ok-soft/60 text-ok hover:bg-ok-soft'
+                      : isError
+                        ? 'border-danger/40 bg-danger-soft text-danger'
+                        : isStale
+                          ? 'border-stale/40 bg-stale/10 text-stale'
+                          : 'border-line bg-paper text-ink hover:bg-accent-soft/60',
                 )}
               >
-                Chapitre {c.chapter_number} {isDone && '✓'}
+                <span className="shrink-0">Ch. {c.chapter_number}</span>
+                {c.title && <span className="truncate font-normal text-muted">· {c.title}</span>}
+                {isDone && <Check size={15} className="shrink-0 text-ok" aria-label="Validé" />}
+                {isReview && (
+                  <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-accent">
+                    <span className="h-2 w-2 rounded-full bg-accent" aria-hidden="true" />
+                    À relire
+                  </span>
+                )}
+                {isStale && <AlertTriangle size={14} className="shrink-0 text-stale" aria-label="À actualiser" />}
+                {isError && <AlertCircle size={14} className="shrink-0 text-danger" aria-label="Erreur" />}
               </button>
             );
           })}
@@ -690,124 +1107,179 @@ function SimpleStep5Book({ project }: { project: Project }) {
       {chapter && (
         <Card className="space-y-5 p-6">
           <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line pb-4">
-            <div>
-              <Badge className="mb-2 text-sm">
-                {chapter.status === 'APPROVED'
-                  ? 'Chapitre terminé et validé'
-                  : chapter.status === 'REVIEW'
-                    ? 'Chapitre prêt à relire'
-                    : chapter.status === 'GENERATING'
-                      ? 'Écriture en cours…'
-                      : 'Chapitre à écrire'}
+            <div className="min-w-0 flex-1">
+              <Badge className={cn('mb-2 text-sm', CHAPTER_STATUS_INFO[chapter.status].className)}>
+                {CHAPTER_STATUS_INFO[chapter.status].label}
               </Badge>
               <h1 className="font-serif text-2xl font-bold">
                 Chapitre {chapter.chapter_number} : {chapter.title}
               </h1>
               <p className="mt-1 text-base text-muted">{chapter.brief_summary}</p>
             </div>
-            {chapterFullText && <SpeakButton text={chapterFullText} label="Écouter ce chapitre" />}
+            {chapterFullText && <SpeakButton compact text={chapterFullText} label="Écouter ce chapitre" />}
           </div>
 
           <ErrorNote error={error} />
 
           {blockedByPrevious && (
-            <p className="rounded-lg bg-accent-soft p-4 text-base font-medium text-accent">
-              Pour garder une histoire cohérente, validez d'abord le Chapitre {previous.chapter_number}.
-            </p>
-          )}
-
-          {!blockedByPrevious && (chapter.status === 'PENDING' || chapter.status === 'PLANNED' || chapter.status === 'ERROR' || hasPendingScenes) && (
-            <div className="py-4">
-              <Button
-                disabled={busy || running}
-                className="h-16 w-full px-8 text-xl font-bold sm:w-auto"
-                onClick={() =>
-                  void run(async () => {
-                    await flushAllAutosaves();
-                    await api.writeChapter(chapter.id);
-                  }, 'write')
-                }
-              >
-                <PenLine size={22} /> Rédiger le Chapitre {chapter.chapter_number} maintenant
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-accent-soft p-4">
+              <p className="text-base font-medium text-accent">
+                Pour garder une histoire cohérente, validez d'abord le Chapitre {previous.chapter_number}.
+              </p>
+              <Button variant="secondary" size="md" onClick={() => setActive(previous.id)}>
+                <ArrowLeft size={16} /> Aller au Chapitre {previous.chapter_number}
               </Button>
             </div>
           )}
 
-          <div className="space-y-6">
+          {!blockedByPrevious &&
+            (chapter.status === 'PENDING' || chapter.status === 'PLANNED' || chapter.status === 'ERROR' || hasPendingScenes) && (
+              <div className="py-2">
+                <Button
+                  variant="primary"
+                  size="xl"
+                  disabled={busy || running}
+                  className="w-full sm:w-auto"
+                  onClick={() =>
+                    void run(async () => {
+                      await flushAllAutosaves();
+                      await api.writeChapter(chapter.id);
+                    }, 'write')
+                  }
+                >
+                  <PenLine size={20} />
+                  {hasWrittenScene
+                    ? `Reprendre le Chapitre ${chapter.chapter_number}`
+                    : `Écrire le Chapitre ${chapter.chapter_number}`}
+                </Button>
+              </div>
+            )}
+
+          <div className="space-y-5">
             {scenes.map((s) => (
               <SimpleSceneItem key={`${s.id}:${s.status}`} scene={s} showPartHeader={scenes.length > 1} />
             ))}
           </div>
 
           {chapter.status === 'REVIEW' && allReview && (
-            <div className="space-y-5 border-t border-line pt-5">
-              <div className="flex flex-wrap gap-4">
+            <div className="space-y-4 border-t border-line pt-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <Button
+                  variant="secondary"
+                  size="lg"
+                  disabled={busy || running}
+                  aria-expanded={showRewrite}
+                  onClick={() => setShowRewrite((v) => !v)}
+                >
+                  <RefreshCw size={18} /> Réécrire…
+                </Button>
+
+                <Button
+                  variant="success"
+                  size="xl"
                   disabled={busy || running}
                   loading={doing === 'approve'}
-                  className="h-16 flex-1 px-8 text-xl font-bold"
+                  className="w-full sm:w-auto"
                   onClick={() =>
                     void run(async () => {
                       await flushAllAutosaves();
                       await api.approveChapter(chapter.id);
+                      toastSuccess(`Chapitre ${chapter.chapter_number} validé !`);
                       if (nextChapter) setActive(nextChapter.id);
                     }, 'approve')
                   }
                 >
-                  <Check size={22} />
+                  {doing !== 'approve' && <Check size={20} />}
                   {doing === 'approve'
                     ? 'Validation en cours…'
                     : nextChapter
-                      ? `Valider ce chapitre et passer au Chapitre ${nextChapter.chapter_number}`
+                      ? `Valider et passer au Chapitre ${nextChapter.chapter_number}`
                       : 'Valider ce dernier chapitre'}
                 </Button>
               </div>
 
-              <div className="space-y-3 rounded-xl border border-line bg-paper p-4">
-                <h3 className="font-serif text-lg font-bold">Ce chapitre ne vous convient pas tout à fait ?</h3>
-                <p className="text-sm text-muted">
-                  Dictez au micro ou écrivez ce que vous souhaitez changer dans ce chapitre, puis cliquez sur « Réécrire ce chapitre ».
-                </p>
-                <VoiceDictationButton
-                  label="Dicter mes consignes pour ce chapitre"
-                  value={dictatedChange}
-                  onChange={setDictatedChange}
-                />
-                <Textarea
-                  aria-label="Consignes pour réécrire ce chapitre"
-                  value={dictatedChange}
-                  onChange={(e) => setDictatedChange(e.target.value)}
-                  placeholder="Exemple : « Ajoute le souvenir de la maison familiale »…"
-                />
+              {showRewrite && (
+                <div className="space-y-3 rounded-xl border border-line bg-paper p-4">
+                  <h3 className="font-serif text-lg font-bold">Ce chapitre ne vous convient pas tout à fait ?</h3>
+                  <p className="text-sm text-muted">
+                    Dictez au micro ou écrivez ce que vous souhaitez changer, puis cliquez sur « Réécrire ce chapitre ».
+                  </p>
+                  <VoiceDictationButton
+                    compact
+                    label="Dicter mes consignes"
+                    value={dictatedChange}
+                    onChange={setDictatedChange}
+                  />
+                  <Textarea
+                    aria-label="Consignes pour réécrire ce chapitre"
+                    value={dictatedChange}
+                    onChange={(e) => setDictatedChange(e.target.value)}
+                    placeholder="Exemple : « Ajoute le souvenir de la maison familiale »…"
+                  />
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button variant="ghost" onClick={() => setShowRewrite(false)}>
+                      Fermer
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      disabled={busy || running}
+                      onClick={() => setConfirmRewrite(true)}
+                    >
+                      <RefreshCw size={18} /> Réécrire ce chapitre
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {chapter.status === 'STALE' && (
+            <div className="space-y-3 rounded-xl border border-stale/35 bg-stale/10 p-4">
+              <p className="flex items-start gap-2 text-base font-medium text-stale">
+                <AlertTriangle size={20} className="mt-0.5 shrink-0" />
+                <span>{chapter.stale_reason || 'Un chapitre précédent a changé : la mémoire de ce chapitre doit être actualisée.'}</span>
+              </p>
+              <div className="flex flex-wrap gap-3">
                 <Button
-                  variant="secondary"
+                  variant="primary"
+                  size="lg"
                   disabled={busy || running}
-                  className="h-12 px-5 text-base font-semibold"
+                  loading={doing === 'refresh'}
                   onClick={() =>
                     void run(async () => {
                       await flushAllAutosaves();
-                      if (dictatedChange.trim()) {
-                        await pb.collection('chapters').update(chapter.id, {
-                          brief_summary: `${chapter.brief_summary}\n\nConsigne de l'auteur : ${dictatedChange.trim()}`,
-                        });
-                        setDictatedChange('');
-                      }
-                      await api.rewriteChapter(chapter.id);
-                    }, 'rewrite')
+                      await api.refreshMemory(chapter.id);
+                      toastSuccess('Mémoire du chapitre actualisée.');
+                    }, 'refresh')
                   }
                 >
-                  <RefreshCw size={18} /> Réécrire ce chapitre
+                  Actualiser la mémoire
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="lg"
+                  disabled={busy || running}
+                  onClick={() =>
+                    void run(async () => {
+                      await flushAllAutosaves();
+                      await api.reopenChapter(chapter.id);
+                    }, 'reopen')
+                  }
+                >
+                  Modifier ce chapitre
                 </Button>
               </div>
             </div>
           )}
 
-          {(chapter.status === 'APPROVED' || chapter.status === 'STALE') && (
-            <div className="flex flex-wrap gap-3 border-t border-line pt-4">
+          {chapter.status === 'APPROVED' && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+              <span className="text-sm font-medium text-ok">Chapitre validé (lecture seule)</span>
               <Button
                 variant="secondary"
+                size="md"
                 disabled={busy || running}
-                className="h-12 px-5 text-base font-semibold"
                 onClick={() =>
                   void run(async () => {
                     await flushAllAutosaves();
@@ -815,63 +1287,107 @@ function SimpleStep5Book({ project }: { project: Project }) {
                   }, 'reopen')
                 }
               >
-                Déverrouiller ce chapitre pour le modifier
+                Déverrouiller pour modifier
               </Button>
             </div>
           )}
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+            <Button
+              variant="secondary"
+              size="md"
+              disabled={!prevChapter}
+              onClick={() => prevChapter && setActive(prevChapter.id)}
+            >
+              <ArrowLeft size={16} /> Chapitre précédent
+            </Button>
+            {nextChapter && (
+              <Button
+                variant={chapter.status === 'APPROVED' && nextChapter.status !== 'APPROVED' ? 'primary' : 'secondary'}
+                size="md"
+                onClick={() => setActive(nextChapter.id)}
+              >
+                Chapitre suivant <ArrowRight size={16} />
+              </Button>
+            )}
+          </div>
         </Card>
       )}
 
-      {writtenCount > 0 && (
-        <Card className="space-y-4 border-2 border-accent/30 p-6">
+      {writtenCount > 0 && !allDone && (
+        <Card className="space-y-4 p-5">
           <div className="flex items-center gap-2">
-            <BookOpen className="text-accent" size={24} />
-            <h2 className="font-serif text-2xl font-bold">Récupérer ou imprimer mon livre « {project.title} »</h2>
+            <BookOpen className="text-muted" size={20} />
+            <h2 className="font-serif text-xl font-bold">Télécharger un aperçu provisoire</h2>
           </div>
-          <p className="text-base text-muted">
-            Téléchargez votre manuscrit mis en page pour l'imprimer sur papier ou le lire sur une tablette.
+          <p className="text-sm text-muted">
+            Vous pouvez déjà télécharger les chapitres rédigés pour les imprimer ou les relire sur tablette.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Button
-              variant="secondary"
-              disabled={busy}
-              className="h-14 text-lg font-semibold"
-              onClick={() =>
-                void run(async () => {
-                  await flushAllAutosaves();
-                  await api.exportBook(project.id, 'docx', false);
-                })
-              }
-            >
-              <Download size={20} /> Télécharger pour Imprimer / Word (.docx)
+            <Button variant="secondary" size="lg" disabled={busy} onClick={() => exportFile('docx')}>
+              <Download size={18} /> Imprimer / Word (.docx)
             </Button>
-            <Button
-              variant="secondary"
-              disabled={busy}
-              className="h-14 text-lg font-semibold"
-              onClick={() =>
-                void run(async () => {
-                  await flushAllAutosaves();
-                  await api.exportBook(project.id, 'epub', false);
-                })
-              }
-            >
-              <Download size={20} /> Télécharger pour Liseuse / Tablette (.epub)
+            <Button variant="secondary" size="lg" disabled={busy} onClick={() => exportFile('epub')}>
+              <Download size={18} /> Liseuse / Tablette (.epub)
             </Button>
           </div>
         </Card>
       )}
+
+      <Dialog
+        open={confirmWriteAll}
+        onOpenChange={setConfirmWriteAll}
+        title="Écrire tout le reste du livre ?"
+        description={
+          `${remainingChapters > 1 ? `Les ${remainingChapters} chapitres restants seront rédigés et validés` : 'Le chapitre restant sera rédigé et validé'} automatiquement. ` +
+          (reviewCount > 0
+            ? `Attention : ${reviewCount > 1 ? `${reviewCount} chapitres en attente de relecture seront refaits` : 'un chapitre en attente de relecture sera refait'}. Les chapitres déjà validés ne changent pas.`
+            : "Vous pourrez toujours rouvrir et corriger n'importe quel chapitre ensuite.")
+        }
+      >
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" onClick={() => setConfirmWriteAll(false)}>
+            Annuler
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => {
+              setConfirmWriteAll(false);
+              void run(async () => {
+                await flushAllAutosaves();
+                await api.writeAll(project.id);
+              }, 'write-all');
+            }}
+          >
+            Tout écrire maintenant
+          </Button>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={confirmRewrite}
+        onOpenChange={setConfirmRewrite}
+        title={chapter ? `Réécrire tout le Chapitre ${chapter.chapter_number} ?` : 'Réécrire ce chapitre ?'}
+        description="Le texte actuel de ce chapitre sera remplacé par une nouvelle version."
+      >
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="secondary" onClick={() => setConfirmRewrite(false)}>
+            Annuler
+          </Button>
+          <Button variant="primary" onClick={rewriteCurrentChapter}>
+            Réécrire ce chapitre
+          </Button>
+        </div>
+      </Dialog>
     </div>
   );
 }
 
 export function SimpleWorkspace({ project }: { project: Project }) {
   const activeStepView = useProjectStore((s) => s.activeStepView);
-  const setStep = useProjectStore((s) => s.setStep);
 
   return (
     <div>
-      <SimpleStepper status={project.status} active={activeStepView} onSelect={setStep} />
       {activeStepView === 1 && <SimpleStep1 key={project.id} project={project} />}
       {activeStepView === 2 && <SimpleStep2 project={project} />}
       {activeStepView === 3 && <SimpleStep3 project={project} />}

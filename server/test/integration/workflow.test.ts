@@ -182,14 +182,18 @@ describe('tranches 2 et 3 : du fichier à l’échantillon', () => {
   });
 
   it('génère la trame et conserve à la regénération un chapitre retouché', async () => {
-    expect((await u.api('POST', `/projects/${projectId}/outline`)).status).toBe(200);
+    const first = await u.api('POST', `/projects/${projectId}/outline`);
+    expect(first.status).toBe(202);
+    expect((await job(h, first.body.jobId)).status).toBe('DONE');
     const chapters = () => h.su.collection('chapters').getFullList({ filter: `project = "${projectId}"`, sort: 'chapter_number' });
     let list = await chapters();
     expect(list).toHaveLength(4);
     expect((await h.su.collection('projects').getOne(projectId)).status).toBe('STEP_3_OUTLINE_REVIEW');
     await u.pb.collection('chapters').update(list[1]!.id, { brief_summary: 'Écrit à la main', user_edited_outline: true });
     const untouched = list[0]!.id;
-    expect((await u.api('POST', `/projects/${projectId}/outline`, { userFeedback: 'Plus sombre' })).status).toBe(200);
+    const again = await u.api('POST', `/projects/${projectId}/outline`, { userFeedback: 'Plus sombre' });
+    expect(again.status).toBe(202);
+    expect((await job(h, again.body.jobId)).status).toBe('DONE');
     list = await chapters();
     expect(list).toHaveLength(4);
     expect(list.map((c) => c.chapter_number)).toEqual([1, 2, 3, 4]);
@@ -283,21 +287,26 @@ describe('verrou', () => {
     expect(jobs).toHaveLength(1);
   });
 
-  it('un double clic sur la route synchrone outline aussi', async () => {
+  it('un double clic sur la route outline aussi', async () => {
     const { project } = await writingProject(h, u, 2);
     await h.su.collection('projects').update(project.id, { status: 'STEP_2_CONCEPT_REVIEW' });
     const before = h.mock.requests.length;
     const [a, b] = await Promise.all([u.api('POST', `/projects/${project.id}/outline`), u.api('POST', `/projects/${project.id}/outline`)]);
-    expect([a.status, b.status].sort()).toEqual([200, 409]);
+    expect([a.status, b.status].sort()).toEqual([202, 409]);
+    await job(h, (a.status === 202 ? a : b).body.jobId);
     expect(h.mock.requests.length).toBe(before + 1);
   });
 
   it('relâche le verrou après une erreur', async () => {
     const { project } = await writingProject(h, u, 1);
     await h.su.collection('projects').update(project.id, { status: 'STEP_2_CONCEPT_REVIEW', reformulated_concept: '[[REFUSE]]' });
-    expect((await u.api('POST', `/projects/${project.id}/outline`)).status).toBe(422);
+    const refused = await u.api('POST', `/projects/${project.id}/outline`);
+    expect(refused.status).toBe(202);
+    expect((await job(h, refused.body.jobId)).status).toBe('FAILED');
     await h.su.collection('projects').update(project.id, { reformulated_concept: 'ok' });
-    expect((await u.api('POST', `/projects/${project.id}/outline`)).status).toBe(200);
+    const retry = await u.api('POST', `/projects/${project.id}/outline`);
+    expect(retry.status).toBe(202);
+    expect((await job(h, retry.body.jobId)).status).toBe('DONE');
   });
 
   it('un job en base bloque même sans verrou mémoire', async () => {

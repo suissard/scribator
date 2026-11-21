@@ -41,12 +41,17 @@ export function projectRoutes(app: FastifyInstance, deps: Deps): void {
     return reply.code(202).send({ jobId });
   });
 
-  app.post<P>('/projects/:id/outline', aiRoute(auth), async (req) => {
+  app.post<P>('/projects/:id/outline', aiRoute(auth), async (req, reply) => {
     const project = await getOwned<ProjectRecord>(req, 'projects', req.params.id);
     const { userFeedback } = z.object({ userFeedback: z.string().max(5000).optional() }).parse(req.body ?? {});
     if (!atLeast(project.status, 'STEP_2_CONCEPT_REVIEW')) throw conflict("Lance d'abord l'analyse.");
-    await guardedAi(deps, req, project.id, () => gen.generateOutline(callContext(req, project.id), project.id, userFeedback));
-    return { ok: true };
+    await guardedJob(deps, req, project.id);
+    const jobId = await jobs.launch({
+      userId: req.user.id, projectId: project.id, kind: 'OUTLINE', targetId: project.id,
+      requestId: req.id, logger: req.log,
+      run: (job) => gen.outlineJob(job, project.id, userFeedback),
+    });
+    return reply.code(202).send({ jobId });
   });
 
   app.post<P>('/projects/:id/sample', aiRoute(auth), async (req, reply) => {

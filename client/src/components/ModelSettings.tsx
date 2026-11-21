@@ -70,7 +70,7 @@ export function ModelSettings({ project, compact }: { project: Project; compact?
     <Card className={cn('space-y-2', compact && 'p-4')}>
       <h2 className={compact ? 'text-sm font-semibold' : 'font-semibold'}>Modèle de rédaction</h2>
       <p className="break-all text-sm">{label}</p>
-      {!compact && <p className="text-sm text-muted">Il écrit le concept, la trame et les scènes de ce livre. Tu peux en changer à tout moment.</p>}
+      {!compact && <p className="text-sm text-muted">Il écrit le concept, la trame et les scènes de ce livre. Vous pouvez en changer à tout moment.</p>}
       <ErrorNote error={open ? null : error} />
       <Button size="sm" variant="secondary" disabled={job !== null} onClick={() => setOpen(true)}>Changer de modèle</Button>
 
@@ -84,7 +84,7 @@ export function ModelSettings({ project, compact }: { project: Project; compact?
             <input type="checkbox" className="accent-[var(--color-accent)]" checked={freeOnly} onChange={(e) => setFreeOnly(e.target.checked)} />
             Modèles gratuits uniquement
           </label>
-          {freeOnly && <p className="text-xs text-muted">Les modèles gratuits ont un quota quotidien partagé par tout le serveur et leur qualité varie beaucoup. Beaucoup exigent aussi d'autoriser l'entraînement sur tes textes dans les réglages d'OpenRouter.</p>}
+          {freeOnly && <p className="text-xs text-muted">Les modèles gratuits ont un quota quotidien partagé par tout le serveur et leur qualité varie beaucoup. Beaucoup exigent aussi d'autoriser l'entraînement sur vos textes dans les réglages d'OpenRouter.</p>}
           <ErrorNote error={error} />
           <ul className="max-h-80 space-y-1 overflow-y-auto">
             {!query && !freeOnly && (

@@ -59,6 +59,7 @@ const STAGE_PURPOSES: Record<StageKey, Purpose[]> = {
   read: [],
   style: ['style_extract'],
   concept: ['concept'],
+  outline: ['outline'],
   sample: ['sample', 'scene_write'],
   plan: ['scene_plan'],
   write: ['scene_write', 'sample'],
@@ -67,7 +68,7 @@ const STAGE_PURPOSES: Record<StageKey, Purpose[]> = {
 
 /** Ordres de grandeur pour un serveur sans aucun historique : le premier maillon mesuré les remplace. */
 const DEFAULT_STAGE_MS: Record<StageKey, number> = {
-  read: 3_000, style: 45_000, concept: 60_000, sample: 90_000, plan: 15_000, write: 90_000, memory: 30_000,
+  read: 3_000, style: 45_000, concept: 60_000, outline: 60_000, sample: 90_000, plan: 15_000, write: 90_000, memory: 30_000,
 };
 
 const mean = (values: number[]) => values.reduce((n, v) => n + v, 0) / values.length;

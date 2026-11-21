@@ -30,7 +30,7 @@ async function request(method: string, path: string, body?: unknown): Promise<Re
     });
   } catch {
     log.error(`Serveur injoignable : ${route}`);
-    throw new ApiError('Le serveur est injoignable. Vérifie ta connexion.', 0);
+    throw new ApiError('Le serveur est injoignable. Vérifiez votre connexion.', 0);
   }
   const ms = Math.round(performance.now() - started);
   const requestId = res.headers.get('x-request-id') ?? undefined;
@@ -69,7 +69,7 @@ const realApi = {
   models: () => json<{ default_model: string; models: ModelOption[] }>('GET', '/models'),
   setModel: (id: string, model: string) => json('PATCH', `/projects/${id}/model`, { model }),
   analyze: (id: string, feedback?: string) => json<{ jobId: string }>('POST', `/projects/${id}/analyze`, { feedback }),
-  outline: (id: string, userFeedback?: string) => json('POST', `/projects/${id}/outline`, { userFeedback }),
+  outline: (id: string, userFeedback?: string) => json<{ jobId: string }>('POST', `/projects/${id}/outline`, { userFeedback }),
   sample: (id: string) => json<{ jobId: string }>('POST', `/projects/${id}/sample`, {}),
   approveSample: (id: string) => json('POST', `/projects/${id}/sample/approve`, {}),
   writeAll: (id: string) => json<{ jobId: string }>('POST', `/projects/${id}/write-all`, {}),

@@ -22,7 +22,7 @@ export function Dialog({ open, onOpenChange, title, description, children, wide 
         >
           <D.Title className="pr-8 text-lg font-semibold">{title}</D.Title>
           {description && <D.Description className="mt-1 text-sm text-muted">{description}</D.Description>}
-          <D.Close className="absolute right-4 top-4 cursor-pointer text-muted hover:text-ink" aria-label="Fermer">
+          <D.Close className="absolute right-3 top-3 flex h-10 w-10 cursor-pointer items-center justify-center rounded-md text-muted hover:bg-accent-soft/60 hover:text-ink" aria-label="Fermer">
             <X size={18} />
           </D.Close>
           <div className="mt-4">{children}</div>

@@ -42,7 +42,7 @@ export function subscribe<T>(collection: string, filter: string, handler: Handle
     .catch((e: unknown) => {
       if (stopped) return;
       reportError(`Abonnement Realtime impossible (${collection}) : ${String(e)}`);
-      toastError("Le suivi en direct est indisponible : recharge la page pour voir les dernières modifications.");
+      toastError("Le suivi en direct est indisponible : rechargez la page pour voir les dernières modifications.");
     });
   return () => {
     stopped = true;

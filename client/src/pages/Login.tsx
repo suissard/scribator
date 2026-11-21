@@ -1,12 +1,12 @@
-import { Feather } from 'lucide-react';
+import { Eye, EyeOff, Feather } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { pb } from '@/api/pocketbase';
+import { MockToggle } from '@/components/layout/MockToggle';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { Field, Input } from '@/components/ui/field';
-import { MockToggle } from '@/components/layout/MockToggle';
 import { getMockMode } from '@/lib/mockState';
 
 export function Login() {
@@ -14,6 +14,7 @@ export function Login() {
   const isMock = getMockMode();
   const [email, setEmail] = useState(isMock ? 'demo@scribator.test' : '');
   const [password, setPassword] = useState(isMock ? 'demo-password-1234' : '');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -33,7 +34,7 @@ export function Login() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center p-4">
-      <div className="absolute top-4 right-4">
+      <div className="absolute right-4 top-4">
         <MockToggle />
       </div>
       <Card className="w-full max-w-sm space-y-5">
@@ -49,7 +50,24 @@ export function Login() {
             <Input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
           <Field label="Mot de passe">
-            <Input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+            <div className="relative">
+              <Input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
+                required
+                className="pr-10"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 cursor-pointer items-center justify-center rounded text-muted hover:bg-accent-soft/60 hover:text-ink"
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </Field>
           {isMock && (
             <p className="text-xs text-muted">
@@ -57,7 +75,9 @@ export function Login() {
             </p>
           )}
           <ErrorNote error={error} />
-          <Button type="submit" className="w-full" disabled={busy}>Se connecter</Button>
+          <Button type="submit" className="w-full" loading={busy}>
+            Se connecter
+          </Button>
         </form>
       </Card>
     </div>

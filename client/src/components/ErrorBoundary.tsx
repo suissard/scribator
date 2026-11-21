@@ -17,7 +17,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { failed: 
     return (
       <div className="mx-auto mt-24 max-w-md text-center">
         <h1 className="text-xl font-semibold">Quelque chose s'est mal passé</h1>
-        <p className="mt-2 text-sm text-muted">Ton texte est sauvegardé. Recharge la page pour reprendre.</p>
+        <p className="mt-2 text-sm text-muted">Votre texte est sauvegardé. Rechargez la page pour reprendre.</p>
         <button className="mt-4 cursor-pointer text-sm font-medium text-accent underline" onClick={() => location.reload()}>
           Recharger
         </button>

@@ -1,7 +1,7 @@
 import { log } from './logger';
 import { toastError } from './toast';
 
-const UNEXPECTED = 'Une erreur inattendue est survenue. Si le problème persiste, recharge la page.';
+const UNEXPECTED = 'Une erreur inattendue est survenue. Si le problème persiste, rechargez la page.';
 /** Bruit des navigateurs, sans conséquence pour l'auteur. */
 const IGNORED = /ResizeObserver loop/;
 

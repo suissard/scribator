@@ -218,7 +218,13 @@ export class GenerationService {
 
   /* ---------- Étape 2 : trame (§5.2) ---------- */
 
-  async generateOutline(ctx: CallContext, projectId: string, userFeedback?: string): Promise<void> {
+  /** Job OUTLINE : la trame prend jusqu'à une minute, la barre de génération la montre. */
+  async outlineJob(job: JobHandle, projectId: string, userFeedback?: string): Promise<void> {
+    await job.stages([{ key: 'outline', total: 1 }], await this.stats.stageEstimates(projectId));
+    await job.step('outline', { detail: 'Plan des chapitres' }, () => this.generateOutline(job.ctx, projectId, userFeedback, job.signal));
+  }
+
+  async generateOutline(ctx: CallContext, projectId: string, userFeedback?: string, signal?: AbortSignal): Promise<void> {
     const project = await this.getProject(projectId);
     const existing = await this.listChapters(projectId);
     const locked = existing.filter(isLocked);
@@ -226,7 +232,7 @@ export class GenerationService {
     const missing = Math.max(0, project.target_chapter_count - locked.length);
 
     let generated: Awaited<ReturnType<typeof this.requestOutline>>['chapters'] = [];
-    if (missing > 0) generated = (await this.requestOutline(ctx, project, locked, missing, userFeedback)).chapters;
+    if (missing > 0) generated = (await this.requestOutline(ctx, project, locked, missing, userFeedback, signal)).chapters;
 
     const slots = mergeOutline(locked.map((c) => c.id), generated, missing);
     // Les anciens brouillons ne sont supprimés qu'une fois la réponse de l'IA obtenue.
@@ -250,7 +256,7 @@ export class GenerationService {
     await this.setProjectStatusIf(projectId, 'STEP_2_CONCEPT_REVIEW', 'STEP_3_OUTLINE_REVIEW');
   }
 
-  private requestOutline(ctx: CallContext, project: ProjectRecord, locked: ChapterRecord[], missing: number, feedback?: string) {
+  private requestOutline(ctx: CallContext, project: ProjectRecord, locked: ChapterRecord[], missing: number, feedback?: string, signal?: AbortSignal) {
     const prompt = loadPrompt('outline');
     return this.llm.structured({
       ctx,
@@ -273,6 +279,7 @@ export class GenerationService {
       }),
       schema: AiOutlineSchema,
       maxTokens: 20_000, // 60 chapitres + réflexion ; au-delà de ~21 000, le SDK impose le streaming
+      ...(signal ? { signal } : {}),
     });
   }
 

@@ -50,11 +50,13 @@ export function VoiceDictationButton({
   value,
   onChange,
   label = 'Dicter avec ma voix',
+  compact = false,
   className,
 }: {
   value: string;
   onChange(next: string): void;
   label?: string;
+  compact?: boolean;
   className?: string;
 }) {
   const [listening, setListening] = useState(false);
@@ -121,21 +123,21 @@ export function VoiceDictationButton({
     <div className="inline-flex flex-col items-start gap-1">
       <Button
         type="button"
-        variant={listening ? 'primary' : 'secondary'}
+        variant={listening ? 'dangerSolid' : 'tool'}
+        size={compact ? 'sm' : 'lg'}
         onClick={toggle}
         className={cn(
-          'h-12 px-5 text-base font-semibold shadow-xs',
-          listening && 'bg-danger text-white hover:bg-danger/90',
+          compact ? 'min-h-9 px-3.5 text-sm font-medium' : 'min-h-11 px-4 text-base font-semibold',
           className,
         )}
       >
         {listening ? (
           <>
-            <MicOff size={20} /> Arrêter la dictée
+            <MicOff size={compact ? 16 : 18} /> Arrêter la dictée
           </>
         ) : (
           <>
-            <Mic size={20} className="text-accent" /> {label}
+            <Mic size={compact ? 16 : 18} /> {label}
           </>
         )}
       </Button>
@@ -163,10 +165,12 @@ export function VoiceDictationButton({
 export function SpeakButton({
   text,
   label = 'Écouter le texte',
+  compact = false,
   className,
 }: {
   text: string;
   label?: string;
+  compact?: boolean;
   className?: string;
 }) {
   const [speaking, setSpeaking] = useState(false);
@@ -201,17 +205,21 @@ export function SpeakButton({
   return (
     <Button
       type="button"
-      variant={speaking ? 'primary' : 'secondary'}
+      variant={speaking ? 'primary' : 'tool'}
+      size={compact ? 'sm' : 'lg'}
       onClick={toggle}
-      className={cn('h-12 px-5 text-base font-semibold', className)}
+      className={cn(
+        compact ? 'min-h-9 px-3.5 text-sm font-medium' : 'min-h-11 px-4 text-base font-semibold',
+        className,
+      )}
     >
       {speaking ? (
         <>
-          <Square size={18} /> Arrêter la lecture
+          <Square size={compact ? 14 : 16} /> Arrêter la lecture
         </>
       ) : (
         <>
-          <Volume2 size={20} className="text-accent" /> {label}
+          <Volume2 size={compact ? 16 : 18} /> {label}
         </>
       )}
     </Button>

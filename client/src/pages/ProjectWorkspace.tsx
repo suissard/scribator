@@ -4,7 +4,7 @@ import { subscribe } from '@/api/realtime';
 import { AppShell } from '@/components/layout/AppShell';
 import { JobBar } from '@/components/layout/JobBar';
 import { maxStep, StepIndicator } from '@/components/layout/StepIndicator';
-import { SimpleWorkspace } from '@/components/simple/SimpleWorkspace';
+import { SimpleStepper, SimpleWorkspace } from '@/components/simple/SimpleWorkspace';
 import { Step1Input } from '@/components/steps/Step1Input';
 import { Step2Concept } from '@/components/steps/Step2Concept';
 import { Step3Outline } from '@/components/steps/Step3Outline';
@@ -12,6 +12,7 @@ import { Step4Sample } from '@/components/steps/Step4Sample';
 import { Step5Studio } from '@/components/steps/Step5Studio';
 import { Step6Export } from '@/components/steps/Step6Export';
 import { pb } from '@/api/pocketbase';
+import { resetSaveStatus } from '@/lib/autosaveRegistry';
 import type { Chapter, Job, PendingChange, Project, Scene } from '@/lib/types';
 import { log } from '@/lib/logger';
 import { toastError } from '@/lib/toast';
@@ -30,6 +31,7 @@ export function ProjectWorkspace() {
   useEffect(() => {
     const st = useProjectStore.getState();
     st.reset();
+    resetSaveStatus();
     setNotFound(false);
     shownStatus.current = null;
     st.load(id).catch(() => setNotFound(true));
@@ -54,14 +56,17 @@ export function ProjectWorkspace() {
         if (e.record.status !== 'RUNNING') {
           setUsageKey((k) => k + 1);
           // Filet de sécurité : un événement Realtime a pu être perdu pendant le job.
-          const refreshFailed = () => toastError("Impossible de rafraîchir le livre : recharge la page pour voir le résultat.");
+          const refreshFailed = () => toastError("Impossible de rafraîchir le livre : rechargez la page pour voir le résultat.");
           store.load(id).catch(refreshFailed);
           const chapterId = store.activeChapterId;
           if (chapterId) store.loadScenes(chapterId).catch(refreshFailed);
         }
       }),
     ];
-    return () => stops.forEach((stop) => stop());
+    return () => {
+      stops.forEach((stop) => stop());
+      resetSaveStatus();
+    };
   }, [id]);
 
   useEffect(() => {
@@ -81,9 +86,10 @@ export function ProjectWorkspace() {
     useProjectStore.getState().setStep(Math.min(maxStep(project.status), project.status === 'COMPLETED' ? 6 : 5) as 1);
   }, [project]);
 
-  // Le statut ne passe à l'étape 4 qu'à la fin du job : il faut pourtant y être pour suivre le streaming.
+  // Le statut ne change qu'à la fin du job : il faut pourtant être sur l'étape pour suivre le travail.
   useEffect(() => {
     if (activeJob?.kind === 'SAMPLE') useProjectStore.getState().setStep(4);
+    if (activeJob?.kind === 'OUTLINE') useProjectStore.getState().setStep(3);
   }, [activeJob?.kind]);
 
   useEffect(() => {
@@ -103,9 +109,13 @@ export function ProjectWorkspace() {
   if (!project) return <AppShell><p className="p-6 text-sm text-muted">Chargement…</p></AppShell>;
 
   return (
-    <AppShell usageKey={usageKey}>
+    <AppShell usageKey={usageKey} projectTitle={project.title} showSaveStatus>
       <div className="sticky top-16 z-10">
-        {!isSimple && <StepIndicator status={project.status} active={activeStepView} onSelect={s.setStep} />}
+        {isSimple ? (
+          <SimpleStepper status={project.status} active={activeStepView} onSelect={s.setStep} />
+        ) : (
+          <StepIndicator status={project.status} active={activeStepView} onSelect={s.setStep} />
+        )}
         {activeJob ? <JobBar job={activeJob} /> : failedJob && <JobBar job={failedJob} onDismiss={s.clearJobError} />}
       </div>
       {isSimple ? (

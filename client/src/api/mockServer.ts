@@ -68,14 +68,14 @@ export const mockApi = {
     return { jobId: 'job-mock-analyze' };
   },
 
-  outline: async (id: string, _userFeedback?: string): Promise<unknown> => {
+  outline: async (id: string, _userFeedback?: string): Promise<{ jobId: string }> => {
     setTimeout(async () => {
       await mockPb.collection('projects').update(id, {
         status: 'STEP_3_OUTLINE_REVIEW',
       });
       window.dispatchEvent(new CustomEvent('mock-project-updated', { detail: { id } }));
     }, 1000);
-    return { ok: true };
+    return { jobId: 'job-mock-outline' };
   },
 
   sample: async (id: string): Promise<{ jobId: string }> => {
@@ -159,7 +159,7 @@ export const mockApi = {
       title,
       brief_summary: 'Résumé provisoire du chapitre.',
       target_words: 3000,
-      status: 'PLANNED',
+      status: 'PENDING',
     });
     return newChap;
   },

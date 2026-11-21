@@ -1,9 +1,11 @@
 import { Check, Settings } from 'lucide-react';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { useUiMode, type FontScale, type UiMode } from '@/lib/uiMode';
 import { cn } from '@/lib/utils';
+import { MockToggle } from './MockToggle';
 
 const MODES: Array<{ id: UiMode; title: string; desc: string }> = [
   {
@@ -31,14 +33,14 @@ export function SettingsModal() {
   return (
     <>
       <Button
-        variant="secondary"
+        variant="ghost"
         size={isSimple ? 'md' : 'sm'}
         onClick={() => setOpen(true)}
         aria-label="Ouvrir les paramètres d'affichage"
-        className={cn(isSimple && 'h-10 px-4 text-base font-medium')}
+        className={cn(isSimple && 'px-3 text-base font-medium text-ink')}
       >
         <Settings size={isSimple ? 18 : 15} />
-        <span>Paramètres</span>
+        <span className={isSimple ? undefined : 'hidden md:inline'}>Paramètres</span>
       </Button>
 
       <Dialog
@@ -78,7 +80,7 @@ export function SettingsModal() {
 
           <div className="space-y-3">
             <h3 className="text-base font-semibold">Taille des caractères</h3>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid gap-3 sm:grid-cols-3">
               {SCALES.map((s) => {
                 const active = fontScale === s.id;
                 return (
@@ -99,8 +101,18 @@ export function SettingsModal() {
             </div>
           </div>
 
-          <div className="flex justify-end pt-2">
-            <Button onClick={() => setOpen(false)} className="h-11 px-6 text-base">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                to="/privacy"
+                onClick={() => setOpen(false)}
+                className="text-sm text-muted underline-offset-4 hover:text-ink hover:underline"
+              >
+                Confidentialité et compte
+              </Link>
+              <MockToggle />
+            </div>
+            <Button variant="primary" size="lg" onClick={() => setOpen(false)}>
               Fermer
             </Button>
           </div>

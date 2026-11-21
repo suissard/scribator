@@ -29,11 +29,15 @@ export function StepIndicator({ status, active, onSelect }: { status: ProjectSta
             aria-current={view === active ? 'step' : undefined}
             onClick={() => onSelect(view)}
             className={cn(
-              'flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:text-muted/50',
-              view === active ? 'bg-accent-soft font-medium text-accent' : enabled && 'hover:bg-accent-soft/60',
+              'flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-45',
+              view === active
+                ? 'border-accent/40 bg-accent-soft font-semibold text-accent'
+                : enabled
+                  ? 'border-transparent text-ink hover:bg-accent-soft/60'
+                  : 'border-transparent text-muted',
             )}
           >
-            {view < unlocked ? <Check size={14} /> : <span className="w-3.5 text-center text-xs">{view}</span>}
+            {view < unlocked ? <Check size={14} className="text-ok" /> : <span className="w-3.5 text-center text-xs">{view}</span>}
             {label}
           </button>
         );

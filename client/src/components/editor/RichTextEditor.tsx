@@ -39,5 +39,15 @@ export function RichTextEditor({ value, onChange, ariaLabel, readOnly = false }:
     editor.commands.setContent(value, { emitUpdate: false });
   }, [editor, echo, value]);
 
-  return <EditorContent editor={editor} />;
+  return (
+    <div
+      className={
+        readOnly
+          ? 'text-ink/90'
+          : 'rounded-md transition-shadow focus-within:ring-2 focus-within:ring-accent/40 focus-within:ring-offset-2 focus-within:ring-offset-paper'
+      }
+    >
+      <EditorContent editor={editor} />
+    </div>
+  );
 }

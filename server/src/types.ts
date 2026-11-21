@@ -221,7 +221,7 @@ export interface JobRecord {
   id: string;
   user: string;
   project: string;
-  kind: 'ANALYZE' | 'SAMPLE' | 'CHAPTER' | 'SCENE' | 'BOOK';
+  kind: 'ANALYZE' | 'OUTLINE' | 'SAMPLE' | 'CHAPTER' | 'SCENE' | 'BOOK';
   target_id: string;
   status: 'RUNNING' | 'DONE' | 'CANCELLED' | 'FAILED';
   cancel_requested: boolean;
