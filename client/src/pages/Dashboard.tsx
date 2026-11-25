@@ -19,8 +19,7 @@ const LABELS: Record<ProjectStatus, string> = {
   STEP_1_INPUT: 'Étape 1 : Vos idées',
   STEP_2_CONCEPT_REVIEW: 'Étape 2 : Résumé à relire',
   STEP_3_OUTLINE_REVIEW: 'Étape 3 : Chapitres à relire',
-  STEP_4_SAMPLE_REVIEW: 'Étape 4 : Premières pages',
-  STEP_5_WRITING: 'Étape 5 : Écriture du livre',
+  STEP_5_WRITING: 'Étape 4 : Écriture du livre',
   COMPLETED: 'Livre terminé',
 };
 
@@ -28,9 +27,8 @@ const STEP_NUM: Record<ProjectStatus, number> = {
   STEP_1_INPUT: 1,
   STEP_2_CONCEPT_REVIEW: 2,
   STEP_3_OUTLINE_REVIEW: 3,
-  STEP_4_SAMPLE_REVIEW: 4,
-  STEP_5_WRITING: 5,
-  COMPLETED: 5,
+  STEP_5_WRITING: 4,
+  COMPLETED: 4,
 };
 
 function formatUpdated(iso?: string): string {
@@ -110,7 +108,7 @@ export function Dashboard() {
                       <Badge className={cn(completed ? 'bg-ok-soft text-ok' : undefined, isSimple ? 'text-sm' : undefined)}>
                         {LABELS[p.status]}
                       </Badge>
-                      <span className="text-xs tabular-nums text-muted">Étape {step}/5</span>
+                      <span className="text-xs tabular-nums text-muted">Étape {step}/4</span>
                       {p.genre && <span className="text-xs text-muted">· {p.genre}</span>}
                     </div>
                     {updatedLabel && <span className="block text-xs text-muted">{updatedLabel}</span>}

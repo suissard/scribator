@@ -19,8 +19,13 @@ export interface BudgetLogger {
   warn(o: object, m?: string): void;
 }
 
-export const budgetGuard = (pb: PocketBase, log: BudgetLogger) =>
+export const budgetGuard = (
+  pb: PocketBase,
+  log: BudgetLogger,
+  hasPersonalKey?: (userId: string) => Promise<boolean>,
+) =>
   async function assertBudget(userId: string): Promise<void> {
+    if (hasPersonalKey && (await hasPersonalKey(userId))) return;
     const [user, spent] = await Promise.all([
       pb.collection('users').getOne<{ monthly_budget_usd: number }>(userId, { fields: 'monthly_budget_usd' }),
       monthlySpend(pb, userId),

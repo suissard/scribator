@@ -4,6 +4,7 @@ import { api } from '@/api/server';
 import { SceneBlock } from '@/components/editor/SceneBlock';
 import { ModelSettings } from '@/components/ModelSettings';
 import { PendingChangeCard } from '@/components/review/PendingChangeCard';
+import { AiFeedbackCard } from '@/components/steps/AiFeedbackCard';
 import { AutoWriteCard } from '@/components/steps/AutoWriteCard';
 import { Button } from '@/components/ui/button';
 import { Badge, Card } from '@/components/ui/card';
@@ -38,6 +39,8 @@ export function Step5Studio({ project }: { project: Project }) {
   const loadScenes = useProjectStore((s) => s.loadScenes);
   const upsertChange = useProjectStore((s) => s.upsertChange);
   const [confirmRewrite, setConfirmRewrite] = useState(false);
+  const [planFeedback, setPlanFeedback] = useState('');
+  const [chapterFeedback, setChapterFeedback] = useState('');
   const { busy, doing, error, run } = useAction();
 
   useEffect(() => {
@@ -47,6 +50,8 @@ export function Step5Studio({ project }: { project: Project }) {
   }, [activeId, chapters, setActive]);
 
   useEffect(() => {
+    setPlanFeedback('');
+    setChapterFeedback('');
     if (activeId) loadScenes(activeId).catch(() => toastError('Impossible de charger les scènes de ce chapitre.'));
   }, [activeId, loadScenes]);
 
@@ -134,6 +139,12 @@ export function Step5Studio({ project }: { project: Project }) {
 
             <ErrorNote error={error} />
 
+            {chapter.chapter_number === 1 && chapter.status !== 'APPROVED' && (
+              <div className="rounded-md border border-accent/25 bg-accent-soft/40 p-3 text-sm text-ink">
+                Ce premier chapitre sert d'échantillon : relisez-le et corrigez-le librement, il devient la référence de style du livre et vos retouches servent à ajuster ce style pour la suite.
+              </div>
+            )}
+
             {blocked && previous && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-accent-soft p-3 text-sm text-accent">
                 <span>Validez d'abord le chapitre {previous.chapter_number} pour garder la cohérence du récit.</span>
@@ -192,43 +203,85 @@ export function Step5Studio({ project }: { project: Project }) {
             {scenes.length === 0 && <p className="text-sm text-muted">Aucune scène pour l'instant.</p>}
 
             {!blocked && (chapter.status === 'PLANNED' || (chapter.status === 'REVIEW' && hasPendingScenes)) && scenes.length > 0 && (
-              <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-card/95 p-3 shadow-md backdrop-blur">
-                <Button variant="secondary" disabled={busy || running} loading={doing === 'plan'} onClick={() => act('plan', () => api.planScenes(chapter.id))}>
-                  {doing !== 'plan' && <ListTree size={16} />} Replanifier les scènes
-                </Button>
-                <Button variant="primary" size="lg" disabled={busy || running} onClick={() => act('write', () => api.writeChapter(chapter.id))}>
-                  {hasWrittenScene ? <Play size={16} /> : <PenLine size={16} />}
-                  {hasWrittenScene ? "Reprendre l'écriture" : 'Écrire le chapitre'}
-                </Button>
-              </div>
+              <>
+                <AiFeedbackCard
+                  title="Demander des correctifs à l'IA sur le plan des scènes"
+                  description="Indiquez comment ajuster le découpage des scènes à venir avant de lancer l'écriture."
+                  placeholder="Ex. : « Ajoute une scène de dialogue au début », « Développe davantage la confrontation dans la scène 2 »…"
+                  actionLabel="Corriger le plan des scènes"
+                  loadingLabel="Correction du plan…"
+                  value={planFeedback}
+                  onChange={setPlanFeedback}
+                  disabled={busy || running}
+                  loading={doing === 'plan-feedback'}
+                  onSubmit={() =>
+                    act('plan-feedback', async () => {
+                      await api.planScenes(chapter.id, planFeedback.trim());
+                      setPlanFeedback('');
+                      await loadScenes(chapter.id);
+                      toastSuccess('Plan des scènes mis à jour.');
+                    })
+                  }
+                />
+                <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-card/95 p-3 shadow-md backdrop-blur">
+                  <Button variant="secondary" disabled={busy || running} loading={doing === 'plan'} onClick={() => act('plan', () => api.planScenes(chapter.id))}>
+                    {doing !== 'plan' && <ListTree size={16} />} Replanifier les scènes
+                  </Button>
+                  <Button variant="primary" size="lg" disabled={busy || running} onClick={() => act('write', () => api.writeChapter(chapter.id))}>
+                    {hasWrittenScene ? <Play size={16} /> : <PenLine size={16} />}
+                    {hasWrittenScene ? "Reprendre l'écriture" : 'Écrire le chapitre'}
+                  </Button>
+                </div>
+              </>
             )}
 
             {chapter.status === 'REVIEW' && allReview && (
-              <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-card/95 p-3 shadow-md backdrop-blur">
-                <div>
-                  {!blocked && (
-                    <Button variant="secondary" disabled={busy || running} onClick={() => setConfirmRewrite(true)}>
-                      <RefreshCw size={15} /> Réécrire le chapitre
-                    </Button>
-                  )}
+              <>
+                {!blocked && (
+                  <AiFeedbackCard
+                    title="Demander des correctifs à l'IA sur ce chapitre"
+                    description="Décrivez les modifications souhaitées sur ce chapitre. L'IA replanifiera et réécrira le chapitre en intégrant vos consignes (les anciennes versions restent dans l'historique)."
+                    placeholder="Ex. : « Rends l'atmosphère plus tendue », « Coupe les longueurs au début », « Ajoute un souvenir d'enfance »…"
+                    actionLabel="Appliquer les correctifs au chapitre"
+                    loadingLabel="Réécriture en cours…"
+                    value={chapterFeedback}
+                    onChange={setChapterFeedback}
+                    disabled={busy || running}
+                    loading={doing === 'rewrite' || job?.kind === 'CHAPTER'}
+                    onSubmit={() =>
+                      act('rewrite', async () => {
+                        await api.rewriteChapter(chapter.id, chapterFeedback.trim());
+                        setChapterFeedback('');
+                      })
+                    }
+                  />
+                )}
+                <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-card/95 p-3 shadow-md backdrop-blur">
+                  <div>
+                    {!blocked && (
+                      <Button variant="secondary" disabled={busy || running} onClick={() => setConfirmRewrite(true)}>
+                        <RefreshCw size={15} /> Réécrire le chapitre
+                      </Button>
+                    )}
+                  </div>
+                  <Button
+                    variant="success"
+                    size="lg"
+                    disabled={busy || running}
+                    loading={doing === 'approve'}
+                    onClick={() =>
+                      act('approve', async () => {
+                        await api.approveChapter(chapter.id);
+                        toastSuccess(`Chapitre ${chapter.chapter_number} validé !`);
+                        if (nextChapter) setActive(nextChapter.id);
+                      })
+                    }
+                  >
+                    {doing !== 'approve' && <Check size={18} />}
+                    {doing === 'approve' ? 'Validation…' : 'Valider le chapitre'}
+                  </Button>
                 </div>
-                <Button
-                  variant="success"
-                  size="lg"
-                  disabled={busy || running}
-                  loading={doing === 'approve'}
-                  onClick={() =>
-                    act('approve', async () => {
-                      await api.approveChapter(chapter.id);
-                      toastSuccess(`Chapitre ${chapter.chapter_number} validé !`);
-                      if (nextChapter) setActive(nextChapter.id);
-                    })
-                  }
-                >
-                  {doing !== 'approve' && <Check size={18} />}
-                  {doing === 'approve' ? 'Validation…' : 'Valider le chapitre'}
-                </Button>
-              </div>
+              </>
             )}
 
             {chapter.status === 'APPROVED' && (
@@ -250,7 +303,7 @@ export function Step5Studio({ project }: { project: Project }) {
                   </Button>
                 ) : (
                   allApproved && (
-                    <Button variant="primary" size="md" onClick={() => setStep(6)}>
+                    <Button variant="primary" size="md" onClick={() => setStep(5)}>
                       Exporter le livre <ArrowRight size={15} />
                     </Button>
                   )

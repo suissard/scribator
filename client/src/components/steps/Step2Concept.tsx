@@ -4,6 +4,7 @@ import { pb } from '@/api/pocketbase';
 import { api } from '@/api/server';
 import { RichTextEditor } from '@/components/editor/RichTextEditor';
 import { VersionHistoryModal } from '@/components/editor/VersionHistoryModal';
+import { AiFeedbackCard } from '@/components/steps/AiFeedbackCard';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
@@ -244,6 +245,7 @@ export function Step2Concept({ project }: { project: Project }) {
   const [tab, setTab] = useState<ConceptTab>('concept');
   const [styleDirty, setStyleDirty] = useState(false);
   const [bibleDirty, setBibleDirty] = useState(false);
+  const [correctionFeedback, setCorrectionFeedback] = useState('');
   const [feedback, setFeedback] = useState('');
   const [regenOpen, setRegenOpen] = useState(false);
   const [confirmOutlineOpen, setConfirmOutlineOpen] = useState(false);
@@ -345,6 +347,27 @@ export function Step2Concept({ project }: { project: Project }) {
         <div className={tab === 'bible' ? undefined : 'hidden'}>
           <BibleEditor project={project} running={running} onDirtyChange={setBibleDirty} />
         </div>
+      )}
+
+      {earlyStage && (
+        <AiFeedbackCard
+          title="Demander des correctifs à l'IA sur cette étape"
+          description="Indiquez ce que vous souhaitez ajuster dans le concept ou la Bible proposés ci-dessus : l'IA appliquera vos correctifs en conservant le reste."
+          placeholder="Ex. : « Rends le ton plus sombre », « Change la fin pour un dénouement ouvert », « Renforce le rôle de tel personnage »…"
+          actionLabel="Appliquer les correctifs"
+          loadingLabel="Correction en cours…"
+          value={correctionFeedback}
+          onChange={setCorrectionFeedback}
+          disabled={busy || running}
+          loading={doing === 'analyze' || job?.kind === 'ANALYZE'}
+          onSubmit={() =>
+            void run(async () => {
+              await flushAllAutosaves();
+              await api.analyze(project.id, correctionFeedback.trim());
+              setCorrectionFeedback('');
+            }, 'analyze')
+          }
+        />
       )}
 
       <ErrorNote error={error} />

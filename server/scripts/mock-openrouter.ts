@@ -20,6 +20,7 @@ export interface MockOptions {
 export interface MockServer {
   url: string;
   requests: Array<Record<string, any>>;
+  authHeaders: string[];
   aborted: () => number;
   close: () => Promise<void>;
 }
@@ -142,6 +143,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function startMock(options: MockOptions = {}): Promise<MockServer> {
   const requests: MockServer['requests'] = [];
+  const authHeaders: string[] = [];
   const seenPrefixes = new Set<string>();
   let aborted = 0;
 
@@ -177,13 +179,36 @@ export function startMock(options: MockOptions = {}): Promise<MockServer> {
     req.on('data', (c) => chunks.push(c));
     req.on('end', async () => {
       const url = req.url ?? '';
+      const authHeader = String(req.headers.authorization ?? '');
+      const bearer = authHeader.replace(/^Bearer\s+/i, '').trim();
       if (url.startsWith('/api/v1/models')) {
         res.writeHead(200, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ data: CATALOG }));
         return;
       }
+      if (url.startsWith('/api/v1/key')) {
+        if (!bearer || bearer === 'invalid' || bearer.startsWith('sk-invalid')) {
+          res.writeHead(401, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: { code: 401, message: 'Invalid API key' } }));
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ data: { label: 'Clé simulée', limit_remaining: 42.5, is_free_tier: false } }));
+        return;
+      }
       if (!url.startsWith('/api/v1/chat/completions')) {
         res.writeHead(404).end('{}');
+        return;
+      }
+      authHeaders.push(authHeader);
+      if (bearer === 'invalid' || bearer.startsWith('sk-invalid')) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: { code: 401, message: 'Invalid API key' } }));
+        return;
+      }
+      if (bearer.startsWith('sk-nocredit')) {
+        res.writeHead(402, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: { code: 402, message: 'Insufficient credits' } }));
         return;
       }
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
@@ -269,6 +294,7 @@ export function startMock(options: MockOptions = {}): Promise<MockServer> {
       resolve({
         url: `http://127.0.0.1:${address.port}/api/v1`,
         requests,
+        authHeaders,
         aborted: () => aborted,
         close: () =>
           new Promise((r) => {

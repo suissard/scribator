@@ -57,6 +57,7 @@ export async function startHarness(over: Partial<Record<string, string>> = {}): 
       POCKETBASE_URL: pbUrl,
       PB_SUPERUSER_EMAIL: SU.email,
       PB_SUPERUSER_PASSWORD: SU.password,
+      API_KEY_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       OPENROUTER_API_KEY: 'mock',
       OPENROUTER_BASE_URL: mock.url,
       AI_MODEL_CREATIVE: 'simu/redaction',
@@ -94,7 +95,7 @@ export async function createUser(h: Harness, over: Record<string, unknown> = {})
   const pb = new PocketBase(h.pbUrl);
   pb.autoCancellation(false);
   await pb.collection('users').authWithPassword(email, password);
-  const api = async (method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, payload?: unknown) => {
+  const api = async (method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', url: string, payload?: unknown) => {
     const res = await h.app.inject({
       method, url: `/api${url}`,
       headers: { authorization: `Bearer ${pb.authStore.token}` },

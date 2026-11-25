@@ -54,9 +54,10 @@ describe('buildSceneContext', () => {
     expect(b.user).not.toBe(a.user);
   });
 
-  it('omet le bloc mémoire pour le premier chapitre', () => {
-    const { system } = buildSceneContext(input({ previousChapters: [] }));
+  it('omet le bloc mémoire pour le premier chapitre et indique l’absence de référence validée', () => {
+    const { system } = buildSceneContext(input({ sampleText: '', previousChapters: [] }));
     expect(system).toHaveLength(2);
+    expect(system[0]!.text).toContain('ce premier chapitre deviendra cette référence');
     expect(system.every((b) => b.text.length > 0)).toBe(true);
   });
 
@@ -73,6 +74,20 @@ describe('buildSceneContext', () => {
 
   it('ajoute les instructions de l’auteur', () => {
     expect(buildSceneContext(input({ instructions: 'Plus de pluie' })).user).toContain('Plus de pluie');
+  });
+
+  it('inclut la version précédente de la scène quand des instructions sont fournies, sans toucher au cache système', () => {
+    const base = buildSceneContext(input());
+    const corrected = buildSceneContext(input({ previousContent: 'ANCIENNE_VERSION', instructions: 'Rends la fin plus tendue' }));
+    expect(JSON.stringify(corrected.system)).toBe(JSON.stringify(base.system));
+    expect(corrected.user).toContain('ANCIENNE_VERSION');
+    expect(corrected.user).toContain('Rends la fin plus tendue');
+    expect(corrected.user.indexOf('ANCIENNE_VERSION')).toBeLessThan(corrected.user.indexOf('Rends la fin plus tendue'));
+  });
+
+  it("n'inclut pas previousContent sans instructions", () => {
+    const ctx = buildSceneContext(input({ previousContent: 'ANCIENNE_VERSION' }));
+    expect(ctx.user).not.toContain('ANCIENNE_VERSION');
   });
 });
 

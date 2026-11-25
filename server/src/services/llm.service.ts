@@ -3,12 +3,14 @@ import type { ChatCompletion, ChatCompletionChunk, ChatCompletionCreateParamsNon
 import { z } from 'zod';
 import type { AiEnv } from '../config/env.js';
 import { estimateCostUsd, type TokenUsage } from '../config/pricing.js';
-import { AiOutputError, RefusalError } from '../lib/errors.js';
+import { sanitizeErrorMessage } from '../lib/crypto.js';
+import { AiOutputError, AppError, MissingApiKeyError, RefusalError } from '../lib/errors.js';
 import type { TextBlock } from './context.service.js';
 import type { ModelCatalog } from './models.service.js';
+import type { ResolvedApiKey } from './userKey.service.js';
 
 export type Purpose =
-  | 'style_extract' | 'concept' | 'outline' | 'sample' | 'scene_plan' | 'scene_write'
+  | 'style_extract' | 'concept' | 'outline' | 'scene_plan' | 'scene_write'
   | 'chapter_summary' | 'bible_patch' | 'style_learning' | 'synopsis_compress' | 'test';
 
 export interface Logger {
@@ -119,17 +121,28 @@ export function parseJsonOutput(text: string): unknown {
 }
 
 export class LlmService {
-  readonly client: OpenAI;
+  private readonly resolveApiKey: (userId: string) => Promise<ResolvedApiKey>;
 
   constructor(
     private readonly env: AiEnv,
     readonly catalog: ModelCatalog,
     private readonly saveCall: (entry: AiCallEntry) => Promise<unknown>,
     private readonly assertBudget: (userId: string) => Promise<void>,
+    resolveApiKey?: (userId: string) => Promise<ResolvedApiKey>,
   ) {
-    this.client = new OpenAI({
-      apiKey: env.OPENROUTER_API_KEY,
-      baseURL: env.OPENROUTER_BASE_URL,
+    this.resolveApiKey =
+      resolveApiKey ??
+      (async () => {
+        const key = env.OPENROUTER_API_KEY.trim();
+        if (!key) throw new MissingApiKeyError();
+        return { apiKey: key, source: 'server' };
+      });
+  }
+
+  private createClient(apiKey: string): OpenAI {
+    return new OpenAI({
+      apiKey,
+      baseURL: this.env.OPENROUTER_BASE_URL,
       defaultHeaders: { 'X-OpenRouter-Title': 'Scribator' },
     });
   }
@@ -183,18 +196,33 @@ export class LlmService {
     return estimateCostUsd(this.catalog.priceOf(model), usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens, usage.output_tokens);
   }
 
-  private async fail(c: BaseCall, started: number, e: unknown, partial?: { usage: TokenUsage; cost: number; text: string }): Promise<never> {
+  private async fail(
+    c: BaseCall,
+    started: number,
+    e: unknown,
+    resolved: ResolvedApiKey,
+    partial?: { usage: TokenUsage; cost: number; text: string },
+  ): Promise<never> {
     if (isModerationError(e)) {
       await this.record(c, started, { status: 'REFUSED', model: c.model, stopReason: 'moderation' });
       throw new RefusalError(c.refusalLabel);
     }
     const cancelled = isAbortError(e);
+    const rawMsg = cancelled ? '' : e instanceof Error ? e.message : String(e);
     await this.record(c, started, {
       status: cancelled ? 'CANCELLED' : 'ERROR',
       model: c.model,
       ...(partial ? { usage: partial.usage, cost: partial.cost, response: partial.text } : {}),
-      error: cancelled ? '' : e instanceof Error ? e.message : String(e),
+      error: sanitizeErrorMessage(rawMsg, resolved.apiKey),
     });
+    if (resolved.source === 'user') {
+      if (e instanceof OpenAI.AuthenticationError) {
+        throw new AppError(401, 'user_api_key_invalid', 'Ta clé OpenRouter est invalide ou révoquée. Vérifie-la dans les paramètres.');
+      }
+      if (e instanceof OpenAI.APIError && e.status === 402) {
+        throw new AppError(402, 'user_api_key_credits', 'Le crédit de ton compte OpenRouter est épuisé. Recharge ton compte sur openrouter.ai.');
+      }
+    }
     throw e;
   }
 
@@ -218,7 +246,9 @@ export class LlmService {
   }
 
   private async structuredOnce<S extends z.ZodType>(c: BaseCall & { schema: S }): Promise<z.infer<S>> {
-    await this.assertBudget(c.ctx.userId);
+    const resolved = await this.resolveApiKey(c.ctx.userId);
+    if (resolved.source === 'server') await this.assertBudget(c.ctx.userId);
+    const client = this.createClient(resolved.apiKey);
     const started = Date.now();
     const request = {
       ...this.body(c, { require_parameters: true }),
@@ -229,12 +259,12 @@ export class LlmService {
     };
     let completion: ChatCompletion;
     try {
-      completion = await this.client.chat.completions.create(
+      completion = await client.chat.completions.create(
         request as unknown as ChatCompletionCreateParamsNonStreaming,
         c.signal ? { signal: c.signal } : undefined,
       );
     } catch (e) {
-      return this.fail(c, started, e);
+      return this.fail(c, started, e, resolved);
     }
 
     const raw = completion.usage as OpenRouterUsage | undefined;
@@ -268,7 +298,9 @@ export class LlmService {
   }
 
   private async streamOnce(c: BaseCall & { onText: (accumulated: string) => void }): Promise<{ text: string; truncated: boolean }> {
-    await this.assertBudget(c.ctx.userId);
+    const resolved = await this.resolveApiKey(c.ctx.userId);
+    if (resolved.source === 'server') await this.assertBudget(c.ctx.userId);
+    const client = this.createClient(resolved.apiKey);
     const started = Date.now();
     let accumulated = '';
     let model = c.model;
@@ -276,7 +308,7 @@ export class LlmService {
     let refused = false;
     let raw: OpenRouterUsage | undefined;
     try {
-      const stream = await this.client.chat.completions.create(
+      const stream = await client.chat.completions.create(
         { ...this.body(c), stream: true } as unknown as ChatCompletionCreateParamsStreaming,
         c.signal ? { signal: c.signal } : undefined,
       );
@@ -298,7 +330,7 @@ export class LlmService {
       const usage = usageOf(undefined);
       usage.input_tokens = Math.ceil(JSON.stringify(this.messages(c)).length / CHARS_PER_TOKEN);
       usage.output_tokens = Math.ceil(accumulated.length / CHARS_PER_TOKEN);
-      return this.fail(c, started, e, {
+      return this.fail(c, started, e, resolved, {
         usage,
         cost: estimateCostUsd(this.catalog.priceOf(model), usage.input_tokens, usage.output_tokens),
         text: accumulated,

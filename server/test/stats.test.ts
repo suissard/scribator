@@ -19,11 +19,6 @@ describe('estimateStages', () => {
     expect(s.write.ms).toBe(2000);
   });
 
-  it('prend l’échantillon comme référence tant qu’aucune scène n’est écrite', () => {
-    const s = estimateStages([call({ purpose: 'sample', duration_ms: 4000 })], []);
-    expect(s.write).toMatchObject({ ms: 4000, basis: 'history' });
-  });
-
   it('retombe sur une valeur par défaut sans aucun historique', () => {
     expect(estimateStages([], []).memory.basis).toBe('default');
   });

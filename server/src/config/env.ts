@@ -1,10 +1,12 @@
 import { z } from 'zod';
+import { parseEncryptionKey } from '../lib/crypto.js';
 
 const bool = z.enum(['true', 'false']).transform((v) => v === 'true');
 
 /** Ce qu'il faut pour parler à l'IA : la CLI de la tranche 0 s'en contente, sans base de données. */
 const AiEnvSchema = z.object({
-  OPENROUTER_API_KEY: z.string().min(1),
+  // Clé serveur facultative : repli si l'utilisateur n'a pas enregistré sa propre clé OpenRouter.
+  OPENROUTER_API_KEY: z.string().default(''),
   OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
   // Catalogue de modèles, s'il ne vient pas de OPENROUTER_BASE_URL (simulateur local).
   OPENROUTER_CATALOG_URL: z.string().url().optional(),
@@ -26,6 +28,18 @@ const EnvSchema = AiEnvSchema.extend({
   POCKETBASE_URL: z.string().url(),
   PB_SUPERUSER_EMAIL: z.string().email(),
   PB_SUPERUSER_PASSWORD: z.string().min(1),
+  // Clé maître AES-256 (32 octets en hexadécimal ou base64) pour chiffrer les clés API utilisateur en base.
+  API_KEY_ENCRYPTION_KEY: z.string().min(1).refine(
+    (v) => {
+      try {
+        parseEncryptionKey(v);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Clé AES-256 invalide (32 octets en hex ou base64 attendus)' },
+  ),
   MEMORY_FULLTEXT_TOKEN_LIMIT: z.coerce.number().int().positive().default(100_000),
   SUMMARY_COMPRESS_WORDS: z.coerce.number().int().positive().default(3000),
   JOB_TIMEOUT_MINUTES: z.coerce.number().positive().default(10),

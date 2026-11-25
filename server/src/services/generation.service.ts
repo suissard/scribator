@@ -10,7 +10,7 @@ import {
 } from '../types.js';
 import { estimateBookTokens, type ChapterWork } from './book-estimate.js';
 import { applyBiblePatch, bibleWithIds, toBiblePatch, toStyleSuggestion } from './bible.service.js';
-import { buildSampleContext, buildSceneContext, formatBibleWithIds, formatReferenceMemory, formatStyleMatrix, type ProjectContext } from './context.service.js';
+import { buildSceneContext, formatBibleWithIds, formatReferenceMemory, formatStyleMatrix, type ProjectContext } from './context.service.js';
 import { settledChapterStatus, type JobHandle } from './jobs.service.js';
 import { isAbortError, type CallContext, type LlmService } from './llm.service.js';
 import {
@@ -148,6 +148,18 @@ export class GenerationService {
 
     job.assertNotCancelled();
     const prompt = loadPrompt('concept');
+    const feedbackBlock = feedback?.trim()
+      ? project.reformulated_concept.trim()
+        ? [
+            section('Version précédente à corriger — Concept', project.reformulated_concept),
+            project.story_bible ? section('Version précédente à corriger — Bible', formatBibleWithIds(project.story_bible)) : '',
+            section(
+              "Correctifs demandés par l'auteur sur la version précédente",
+              `${feedback.trim()}\n\nApplique précisément ces correctifs en conservant ce que l'auteur n'a pas demandé de changer.`,
+            ),
+          ].join('')
+        : section("Retour de l'auteur sur la version précédente", feedback)
+      : '';
     const concept = await job.step('concept', { detail: 'Concept et Bible' }, () =>
       this.llm.structured({
         ctx: job.ctx,
@@ -166,7 +178,7 @@ export class GenerationService {
             ? section("Livre précédent fourni par l'auteur (histoire, fin et personnages)", formatReferenceMemory(meta.story_memory))
             : '',
           style_matrix: formatStyleMatrix(matrix),
-          feedback: section("Retour de l'auteur sur la version précédente", feedback),
+          feedback: feedbackBlock,
         }),
         schema: AiConceptSchema,
         maxTokens: STRUCTURED_MAX_TOKENS,
@@ -232,7 +244,7 @@ export class GenerationService {
     const missing = Math.max(0, project.target_chapter_count - locked.length);
 
     let generated: Awaited<ReturnType<typeof this.requestOutline>>['chapters'] = [];
-    if (missing > 0) generated = (await this.requestOutline(ctx, project, locked, missing, userFeedback, signal)).chapters;
+    if (missing > 0) generated = (await this.requestOutline(ctx, project, locked, replaced, missing, userFeedback, signal)).chapters;
 
     const slots = mergeOutline(locked.map((c) => c.id), generated, missing);
     // Les anciens brouillons ne sont supprimés qu'une fois la réponse de l'IA obtenue.
@@ -256,8 +268,30 @@ export class GenerationService {
     await this.setProjectStatusIf(projectId, 'STEP_2_CONCEPT_REVIEW', 'STEP_3_OUTLINE_REVIEW');
   }
 
-  private requestOutline(ctx: CallContext, project: ProjectRecord, locked: ChapterRecord[], missing: number, feedback?: string, signal?: AbortSignal) {
+  private requestOutline(
+    ctx: CallContext,
+    project: ProjectRecord,
+    locked: ChapterRecord[],
+    previousDraft: ChapterRecord[],
+    missing: number,
+    feedback?: string,
+    signal?: AbortSignal,
+  ) {
     const prompt = loadPrompt('outline');
+    const feedbackBlock = feedback?.trim()
+      ? previousDraft.length > 0
+        ? [
+            section(
+              'Plan précédent proposé (chapitres modifiables)',
+              previousDraft.map((c) => `- Chapitre ${c.chapter_number}, ${c.title} : ${c.brief_summary}`).join('\n'),
+            ),
+            section(
+              "Correctifs demandés par l'auteur",
+              `${feedback.trim()}\n\nApplique ces correctifs au plan précédent tout en respectant les chapitres verrouillés et le nombre exact de chapitres attendus.`,
+            ),
+          ].join('')
+        : section("Retour de l'auteur", feedback)
+      : '';
     return this.llm.structured({
       ctx,
       purpose: 'outline',
@@ -275,7 +309,7 @@ export class GenerationService {
           : '(aucun)',
         missing_count: missing,
         target_chapter_count: project.target_chapter_count,
-        feedback: section("Retour de l'auteur", feedback),
+        feedback: feedbackBlock,
       }),
       schema: AiOutlineSchema,
       maxTokens: 20_000, // 60 chapitres + réflexion ; au-delà de ~21 000, le SDK impose le streaming
@@ -317,75 +351,14 @@ export class GenerationService {
     }));
   }
 
-  /* ---------- Échantillon (§5.3) ---------- */
-
-  async writeSample(job: JobHandle, projectId: string): Promise<void> {
-    const project = await this.getProject(projectId);
-    const chapters = await this.listChapters(projectId);
-    const first = chapters[0];
-    if (!first) throw badRequest("La trame doit contenir au moins un chapitre.");
-    const system = loadPrompt('ghostwriter_system');
-    const objective = loadPrompt('sample');
-    const { system: blocks, user } = buildSampleContext({
-      templates: { system: system.text, objective: objective.text },
-      project: this.projectContext(project),
-      outline: chapters,
-      chapter: first,
-    });
-    const writer = new DraftWriter(
-      (text) => this.projects().update(projectId, { sample_draft: text }),
-      this.env.DRAFT_TICK_MS,
-      (e) => job.ctx.log.warn({ err: e }, "échec d'écriture du tampon"),
-    );
-    const commit = async (text: string) => {
-      if (project.sample_text.trim()) {
-        await archiveVersion(this.pb, {
-          project: projectId, target_collection: 'projects', target_id: projectId, field: 'sample_text',
-          content: project.sample_text, reason: 'before_regenerate',
-        });
-      }
-      await this.projects().update(projectId, {
-        sample_text: text,
-        sample_ai_original: text,
-        sample_draft: '',
-        ...(project.status === 'STEP_3_OUTLINE_REVIEW' ? { status: 'STEP_4_SAMPLE_REVIEW' } : {}),
-      });
-    };
-    await job.stages([{ key: 'sample', total: 1 }], await this.stats.stageEstimates(projectId));
-    try {
-      const { text } = await job.step('sample', { detail: "Scène d'ouverture" }, () =>
-        this.llm.stream({
-          ctx: job.ctx,
-          purpose: 'sample',
-          promptVersion: objective.version,
-          model: this.creativeModel(project),
-          effort: this.env.AI_EFFORT_CREATIVE,
-          system: blocks,
-          user,
-          maxTokens: SCENE_MAX_TOKENS,
-          signal: job.signal,
-          refusalLabel: 'cet échantillon',
-          onText: (t) => writer.set(t),
-        }),
-      );
-      await writer.stop();
-      await commit(text);
-    } catch (e) {
-      await writer.stop();
-      if (isAbortError(e) && job.active.keepPartial && writer.text.length > 0) await commit(writer.text);
-      else await this.projects().update(projectId, { sample_draft: '' });
-      throw e;
-    }
-  }
-
   /* ---------- Plan des scènes (§5.5) ---------- */
 
-  async planScenes(ctx: CallContext, chapter: ChapterRecord, signal?: AbortSignal): Promise<void> {
+  async planScenes(ctx: CallContext, chapter: ChapterRecord, signal?: AbortSignal, feedback?: string): Promise<void> {
     const project = await this.getProject(chapter.project);
     const scenes = await this.listScenes(chapter.id);
     const kept = scenes.filter((s) => s.status !== 'PENDING');
     const replaced = scenes.filter((s) => s.status === 'PENDING');
-    const planned = await this.requestScenePlan(ctx, project, chapter, kept, signal);
+    const planned = await this.requestScenePlan(ctx, project, chapter, kept, signal, feedback, replaced);
     for (const s of replaced) await this.dropScene(chapter, s);
     let number = kept.reduce((n, s) => Math.max(n, s.scene_number), 0);
     for (const s of planned) {
@@ -396,11 +369,33 @@ export class GenerationService {
     }
   }
 
-  private async requestScenePlan(ctx: CallContext, project: ProjectRecord, chapter: ChapterRecord, kept: SceneRecord[], signal?: AbortSignal) {
+  private async requestScenePlan(
+    ctx: CallContext,
+    project: ProjectRecord,
+    chapter: ChapterRecord,
+    kept: SceneRecord[],
+    signal?: AbortSignal,
+    feedback?: string,
+    previousPlan: SceneRecord[] = [],
+  ) {
     const remaining = remainingWords(chapter, kept);
     if (remaining < MIN_REMAINING_WORDS) return [];
     const count = defaultSceneCount(remaining);
     const prompt = loadPrompt('scene_plan');
+    const feedbackBlock = feedback?.trim()
+      ? previousPlan.length > 0
+        ? [
+            section(
+              'Plan précédent des scènes',
+              previousPlan.map((s) => `- Scène ${s.scene_number} (~${s.target_words} mots) : ${s.beat}`).join('\n'),
+            ),
+            section(
+              "Correctifs demandés par l'auteur",
+              `${feedback.trim()}\n\nApplique ces correctifs au découpage des scènes.`,
+            ),
+          ].join('')
+        : section("Correctifs demandés par l'auteur", feedback)
+      : '';
     const plan = await this.llm.structured({
       ctx,
       purpose: 'scene_plan',
@@ -415,6 +410,7 @@ export class GenerationService {
         existing_scenes: section('Scènes déjà écrites', kept.map((s) => `- ${s.beat}`).join('\n')),
         scene_count: count,
         remaining_words: remaining,
+        feedback: feedbackBlock,
       }),
       schema: AiScenePlanSchema,
       maxTokens: STRUCTURED_MAX_TOKENS,
@@ -454,12 +450,14 @@ export class GenerationService {
     await this.writePendingScenes(job, chapter, scenes);
   }
 
-  private async writePendingScenes(job: JobHandle, chapter: ChapterRecord, scenes: SceneRecord[]): Promise<void> {
+  private async writePendingScenes(job: JobHandle, chapter: ChapterRecord, scenes: SceneRecord[], instructions?: string): Promise<void> {
     const pending = scenes.filter((s) => s.status === 'PENDING');
     await job.setStageTotal('write', pending.length);
     for (const [index, scene] of pending.entries()) {
       job.assertNotCancelled();
-      await job.step('write', { detail: `Scène ${index + 1} sur ${pending.length}`, chapterId: chapter.id }, () => this.generateScene(job, chapter, scene));
+      await job.step('write', { detail: `Scène ${index + 1} sur ${pending.length}`, chapterId: chapter.id }, () =>
+        this.generateScene(job, chapter, scene, instructions),
+      );
     }
   }
 
@@ -467,10 +465,10 @@ export class GenerationService {
    * Remet tout le chapitre à écrire sur un nouveau plan. Si le plan échoue, rien ne change. Ensuite,
    * chaque scène garde son ancien texte jusqu'à son remplacement, qui l'archive dans son historique.
    */
-  private async replanChapter(ctx: CallContext, chapter: ChapterRecord, signal: AbortSignal): Promise<void> {
+  private async replanChapter(ctx: CallContext, chapter: ChapterRecord, signal: AbortSignal, instructions?: string): Promise<void> {
     const project = await this.getProject(chapter.project);
     const scenes = await this.listScenes(chapter.id);
-    const planned = await this.requestScenePlan(ctx, project, chapter, [], signal);
+    const planned = await this.requestScenePlan(ctx, project, chapter, [], signal, instructions, scenes);
     if (planned.length === 0) throw conflict('Ce chapitre vise trop peu de mots pour être replanifié.');
     for (const [index, plan] of planned.entries()) {
       const data = { ...plan, scene_number: index + 1, status: 'PENDING', truncated: false };
@@ -481,14 +479,14 @@ export class GenerationService {
     for (const extra of scenes.slice(planned.length)) await this.dropScene(chapter, extra);
   }
 
-  async rewriteChapter(job: JobHandle, chapterId: string): Promise<void> {
+  async rewriteChapter(job: JobHandle, chapterId: string, instructions?: string): Promise<void> {
     const chapter = await this.chapters().getOne<ChapterRecord>(chapterId);
     await job.stages(
       [{ key: 'plan', total: 1 }, { key: 'write', total: defaultSceneCount(chapter.target_words) }],
       await this.stats.stageEstimates(chapter.project),
     );
-    await job.step('plan', { detail: 'Nouveau plan des scènes' }, () => this.replanChapter(job.ctx, chapter, job.signal));
-    await this.writePendingScenes(job, chapter, await this.listScenes(chapterId));
+    await job.step('plan', { detail: 'Nouveau plan des scènes' }, () => this.replanChapter(job.ctx, chapter, job.signal, instructions));
+    await this.writePendingScenes(job, chapter, await this.listScenes(chapterId), instructions);
   }
 
   async regenerateScene(job: JobHandle, sceneId: string, instructions?: string): Promise<void> {
@@ -657,6 +655,7 @@ export class GenerationService {
           .filter((s) => s.scene_number < scene.scene_number && s.content.trim())
           .map((s) => s.content.trim()),
         scene,
+        ...(instructions && previousContent.trim() ? { previousContent } : {}),
         ...(instructions ? { instructions } : {}),
       });
       const { text, truncated } = await this.llm.stream({
@@ -743,6 +742,10 @@ export class GenerationService {
       post_writing_summary: memory.summary,
       stale_reason: '',
     });
+    // Le chapitre 1 validé sert d'échantillon de référence de style pour toute la suite du livre.
+    if (chapter.chapter_number === 1) {
+      await this.projects().update(project.id, { sample_text: chapterText(scenes) });
+    }
     await this.handleBiblePatch(ctx, project, memory.patch, chapter.id, options);
     if (suggestion) await this.proposeChange(project.id, 'STYLE_SUGGESTION', suggestion, chapter.id);
 

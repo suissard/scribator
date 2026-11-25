@@ -19,7 +19,17 @@ export class BudgetExceededError extends AppError {
     super(
       402,
       'budget_exceeded',
-      `Budget mensuel atteint (${spent.toFixed(2)} $ sur ${budget.toFixed(2)} $). Contacte l'administrateur pour l'augmenter.`,
+      `Budget mensuel atteint (${spent.toFixed(2)} $ sur ${budget.toFixed(2)} $). Contacte l'administrateur pour l'augmenter, ou ajoute ta propre clé OpenRouter dans les paramètres.`,
+    );
+  }
+}
+
+export class MissingApiKeyError extends AppError {
+  constructor() {
+    super(
+      400,
+      'missing_api_key',
+      'Aucune clé OpenRouter configurée. Ajoute ta clé personnelle dans les paramètres pour lancer la génération.',
     );
   }
 }

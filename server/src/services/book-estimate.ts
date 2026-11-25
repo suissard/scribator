@@ -20,7 +20,7 @@ export interface ChapterWork {
 }
 
 export interface BookTokenInput {
-  /** Consignes, style, échantillon, trame et Bible : identiques pour toutes les scènes. */
+  /** Consignes, style, premier chapitre de référence, trame et Bible : identiques pour toutes les scènes. */
   contextTokens: number;
   chapters: ChapterWork[];
   memoryLimit: number;

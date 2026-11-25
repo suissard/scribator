@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { pb } from '@/api/pocketbase';
 import type { Chapter, Job, PendingChange, Project, Scene } from '@/lib/types';
 
-export type StepView = 1 | 2 | 3 | 4 | 5 | 6;
+export type StepView = 1 | 2 | 3 | 4 | 5;
 
 interface ProjectState {
   project: Project | null;

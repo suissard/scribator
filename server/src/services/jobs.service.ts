@@ -217,8 +217,6 @@ export class JobsService {
     const pb = this.pb;
     const scope = (filter: string, path: string) =>
       projectId ? pb.filter(`(${filter}) && ${path} = {:p}`, { p: projectId }) : filter;
-    const projects = await pb.collection('projects').getFullList({ filter: scope('sample_draft != ""', 'id'), fields: 'id' });
-    for (const p of projects) await pb.collection('projects').update(p.id, { sample_draft: '' });
 
     const scenes = await pb.collection('scenes').getFullList<SceneRecord>({ filter: scope('status = "GENERATING"', 'chapter.project') });
     for (const s of scenes) {

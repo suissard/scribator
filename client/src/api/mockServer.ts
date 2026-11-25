@@ -5,8 +5,10 @@ import {
   MOCK_USAGE,
 } from './mockData';
 import { mockPb } from './mockPocketbase';
-import type { BookEstimate, GenerationReport, Usage } from './server';
+import type { BookEstimate, GenerationReport, Usage, UserKeyStatus, UserKeyValidation } from './server';
 import type { Chapter, ModelOption, Scene } from '@/lib/types';
+
+let mockPersonalKeyHint: string | null = null;
 
 export const mockApi = {
   models: async (): Promise<{ default_model: string; models: ModelOption[] }> => {
@@ -76,24 +78,6 @@ export const mockApi = {
       window.dispatchEvent(new CustomEvent('mock-project-updated', { detail: { id } }));
     }, 1000);
     return { jobId: 'job-mock-outline' };
-  },
-
-  sample: async (id: string): Promise<{ jobId: string }> => {
-    setTimeout(async () => {
-      await mockPb.collection('projects').update(id, {
-        status: 'STEP_4_SAMPLE_REVIEW',
-        sample_text:
-          'Extrait généré (Mock) :\n\nLe vent soufflait sur les toits d\'ardoise. Elle serra son carnet contre elle et franchit le seuil.',
-      });
-      window.dispatchEvent(new CustomEvent('mock-project-updated', { detail: { id } }));
-    }, 1500);
-    return { jobId: 'job-mock-sample' };
-  },
-
-  approveSample: async (id: string): Promise<unknown> => {
-    await mockPb.collection('projects').update(id, { status: 'STEP_5_WRITING' });
-    window.dispatchEvent(new CustomEvent('mock-project-updated', { detail: { id } }));
-    return { ok: true };
   },
 
   writeAll: async (id: string): Promise<{ jobId: string }> => {
@@ -180,7 +164,7 @@ export const mockApi = {
     return { ok: true };
   },
 
-  planScenes: async (chapterId: string): Promise<unknown> => {
+  planScenes: async (chapterId: string, _feedback?: string): Promise<unknown> => {
     setTimeout(async () => {
       await mockPb.collection('scenes').create({
         chapter: chapterId,
@@ -197,14 +181,34 @@ export const mockApi = {
   },
 
   writeChapter: async (chapterId: string): Promise<{ jobId: string }> => {
+    const chapters = (await mockPb.collection('chapters').getFullList()) as Chapter[];
+    const chap = chapters.find((c) => c.id === chapterId);
+    if (chap) {
+      const proj = await mockPb.collection('projects').getOne(chap.project);
+      if (proj && proj.status === 'STEP_3_OUTLINE_REVIEW') {
+        await mockPb.collection('projects').update(chap.project, { status: 'STEP_5_WRITING' });
+        window.dispatchEvent(new CustomEvent('mock-project-updated', { detail: { id: chap.project } }));
+      }
+    }
     setTimeout(async () => {
       const scenes = (await mockPb.collection('scenes').getFullList()) as Scene[];
       const chapScenes = scenes.filter((s) => s.chapter === chapterId);
-      for (const sc of chapScenes) {
-        await mockPb.collection('scenes').update(sc.id, {
-          content: sc.content || 'Contenu rédigé automatiquement en mode Mock.',
+      if (chapScenes.length === 0) {
+        await mockPb.collection('scenes').create({
+          chapter: chapterId,
+          scene_number: 1,
+          beat: chap?.brief_summary || 'Scène principale du chapitre',
+          target_words: chap?.target_words || 1500,
+          content: 'Contenu rédigé automatiquement en mode Mock.',
           status: 'REVIEW',
         });
+      } else {
+        for (const sc of chapScenes) {
+          await mockPb.collection('scenes').update(sc.id, {
+            content: sc.content || 'Contenu rédigé automatiquement en mode Mock.',
+            status: 'REVIEW',
+          });
+        }
       }
       await mockPb.collection('chapters').update(chapterId, { status: 'REVIEW' });
       window.dispatchEvent(new CustomEvent('mock-chapter-updated', { detail: { id: chapterId } }));
@@ -212,7 +216,7 @@ export const mockApi = {
     return { jobId: 'job-mock-write' };
   },
 
-  rewriteChapter: async (chapterId: string): Promise<{ jobId: string }> => {
+  rewriteChapter: async (chapterId: string, _instructions?: string): Promise<{ jobId: string }> => {
     setTimeout(async () => {
       const scenes = (await mockPb.collection('scenes').getFullList()) as Scene[];
       for (const sc of scenes.filter((s) => s.chapter === chapterId)) {
@@ -286,7 +290,42 @@ export const mockApi = {
   },
 
   usage: async (): Promise<Usage> => {
-    return MOCK_USAGE;
+    return { ...MOCK_USAGE, using_own_key: Boolean(mockPersonalKeyHint), server_fallback_available: true };
+  },
+
+  getOpenRouterKey: async (): Promise<UserKeyStatus> => ({
+    configured: Boolean(mockPersonalKeyHint),
+    hint: mockPersonalKeyHint,
+    updated_at: mockPersonalKeyHint ? new Date().toISOString() : null,
+    server_fallback_available: true,
+  }),
+
+  setOpenRouterKey: async (apiKey: string): Promise<UserKeyStatus> => {
+    const trimmed = apiKey.trim();
+    mockPersonalKeyHint = trimmed.length >= 8 ? `…${trimmed.slice(-4)}` : '••••';
+    return {
+      configured: true,
+      hint: mockPersonalKeyHint,
+      updated_at: new Date().toISOString(),
+      server_fallback_available: true,
+    };
+  },
+
+  testOpenRouterKey: async (): Promise<UserKeyValidation> => ({
+    ok: true,
+    label: 'Clé démo',
+    limit_remaining: 42.5,
+    is_free_tier: false,
+  }),
+
+  deleteOpenRouterKey: async (): Promise<UserKeyStatus> => {
+    mockPersonalKeyHint = null;
+    return {
+      configured: false,
+      hint: null,
+      updated_at: null,
+      server_fallback_available: true,
+    };
   },
 
   acceptTerms: async (): Promise<unknown> => {

@@ -75,18 +75,18 @@ describe('tranche 1 : fondations', () => {
 
   it('limite à 30 requêtes par minute sur les routes IA, par utilisateur', async () => {
     const limited = await createUser(h);
-    const { project } = await writingProject(h, limited, 1);
+    const { chapters } = await writingProject(h, limited, 1);
     const codes: number[] = [];
-    for (let i = 0; i < 31; i++) codes.push((await limited.api('POST', `/projects/${project.id}/sample/approve`)).status);
+    for (let i = 0; i < 31; i++) codes.push((await limited.api('POST', `/chapters/${chapters[0]!.id}/approve`)).status);
     expect(codes.slice(0, 30).every((c) => c === 409)).toBe(true);
     expect(codes[30]).toBe(429);
     const other = await createUser(h);
-    const { project: p2 } = await writingProject(h, other, 1);
-    expect((await other.api('POST', `/projects/${p2.id}/sample/approve`)).status).toBe(409);
+    const { chapters: c2 } = await writingProject(h, other, 1);
+    expect((await other.api('POST', `/chapters/${c2[0]!.id}/approve`)).status).toBe(409);
   });
 });
 
-describe('tranches 2 et 3 : du fichier à l’échantillon', () => {
+describe('tranches 2 et 3 : du fichier au premier chapitre (échantillon)', () => {
   let projectId: string;
 
   it('analyse un fichier, le supprime et ouvre l’étape 2', async () => {
@@ -215,62 +215,47 @@ describe('tranches 2 et 3 : du fichier à l’échantillon', () => {
     expect(after.map((c) => c.chapter_number)).toEqual([1, 2, 3, 4]);
   });
 
-  it('écrit l’échantillon par le tampon et le fige', async () => {
-    const r = await u.api('POST', `/projects/${projectId}/sample`);
-    expect(r.status).toBe(202);
-    await job(h, r.body.jobId);
-    const p = await h.su.collection('projects').getOne(projectId);
-    expect(p.status).toBe('STEP_4_SAMPLE_REVIEW');
-    expect(p.sample_draft).toBe('');
-    expect(p.sample_text.length).toBeGreaterThan(100);
-    expect(p.sample_ai_original).toBe(p.sample_text);
-  });
-
-  it('un échantillon reformaté sans changer un mot donne 0 % et aucune suggestion', async () => {
-    const p = await h.su.collection('projects').getOne(projectId);
-    const tiptap = p.sample_text.replace(/'/g, '’').replace(/ /g, ' ');
-    await u.pb.collection('projects').update(projectId, { sample_text: tiptap });
-    const { computeDiff } = await import('../../src/services/memory.service.js');
-    expect(computeDiff(p.sample_ai_original, tiptap).changedPercent).toBe(0);
-  });
-
-  it('une correction de plus de 5 % produit une suggestion avec exemples, sans toucher au style', async () => {
-    const p = await h.su.collection('projects').getOne(projectId);
-    const words = p.sample_ai_original.split(' ');
-    await u.pb.collection('projects').update(projectId, { sample_text: words.slice(0, Math.floor(words.length * 0.8)).join(' ') });
-    const r = await u.api('POST', `/projects/${projectId}/sample/approve`);
-    expect(r.status).toBe(200);
-    expect(r.body.changedPercent).toBeGreaterThan(5);
-    const [change] = await h.su.collection('pending_changes').getFullList({ filter: `project = "${projectId}"` });
-    expect(change).toMatchObject({ kind: 'STYLE_SUGGESTION', status: 'PENDING' });
-    expect(change!.payload.evidence.length).toBeGreaterThan(0);
-    const after = await h.su.collection('projects').getOne(projectId);
-    expect(after.style_matrix.sentence_structure).toBe(p.style_matrix.sentence_structure);
-    expect(after.status).toBe('STEP_5_WRITING');
-  });
-
-  it('transforme l’échantillon en scène 1 du chapitre 1 et applique la proposition acceptée', async () => {
-    const [first] = await h.su.collection('chapters').getFullList({ filter: `project = "${projectId}"`, sort: 'chapter_number' });
-    const scenes = await scenesOf(h, first!.id);
-    expect(scenes).toHaveLength(1);
-    expect(scenes[0]).toMatchObject({ status: 'REVIEW', scene_number: 1 });
-    expect(first!.status).toBe('PLANNED');
-    const [change] = await h.su.collection('pending_changes').getFullList({ filter: `project = "${projectId}"` });
-    expect((await u.api('POST', `/pending-changes/${change!.id}/accept`)).status).toBe(200);
-    expect((await u.api('POST', `/pending-changes/${change!.id}/accept`)).status).toBe(409);
-    const p = await h.su.collection('projects').getOne(projectId);
-    expect(p.style_matrix.stylistic_rules).toContain('Supprimer les adverbes en -ment');
-  });
-
-  it('écrit le chapitre 1 autour de l’échantillon, sans repartir de zéro', async () => {
-    const [first] = await h.su.collection('chapters').getFullList({ filter: `project = "${projectId}"`, sort: 'chapter_number' });
+  it('rédige directement le chapitre 1 depuis la trame, sans phase d’échantillon séparée', async () => {
+    const list = () => h.su.collection('chapters').getFullList({ filter: `project = "${projectId}"`, sort: 'chapter_number' });
+    const [first, second] = await list();
+    expect((await u.api('POST', `/chapters/${second!.id}/write`)).status).toBe(409);
     const j = await writeChapter(h, u, first!.id);
     expect(j.status).toBe('DONE');
+    const p = await h.su.collection('projects').getOne(projectId);
+    expect(p.status).toBe('STEP_5_WRITING');
     const scenes = await scenesOf(h, first!.id);
     expect(scenes.length).toBeGreaterThan(1);
     expect(scenes.every((s) => s.status === 'REVIEW')).toBe(true);
     const total = scenes.reduce((n, s) => n + countWords(s.content), 0);
     expect(Math.abs(total - 2000) / 2000).toBeLessThan(0.15);
+  });
+
+  it('un chapitre reformaté sans changer un mot donne 0 % et aucune suggestion', async () => {
+    const [first] = await h.su.collection('chapters').getFullList({ filter: `project = "${projectId}"`, sort: 'chapter_number' });
+    const scenes = await scenesOf(h, first!.id);
+    const tiptap = scenes[0]!.content.replace(/'/g, '’').replace(/ /g, ' ');
+    const { computeDiff } = await import('../../src/services/memory.service.js');
+    expect(computeDiff(scenes[0]!.ai_original_content, tiptap).changedPercent).toBe(0);
+  });
+
+  it('une correction de plus de 5 % sur le chapitre 1 produit une suggestion et fige le chapitre comme référence de style', async () => {
+    const before = await h.su.collection('projects').getOne(projectId);
+    const [first] = await h.su.collection('chapters').getFullList({ filter: `project = "${projectId}"`, sort: 'chapter_number' });
+    const scenes = await scenesOf(h, first!.id);
+    const words = scenes[0]!.ai_original_content.split(' ');
+    await u.pb.collection('scenes').update(scenes[0]!.id, { content: words.slice(0, Math.floor(words.length * 0.5)).join(' ') });
+    const res = await approveChapter(u, first!.id);
+    expect(res.changedPercent).toBeGreaterThan(5);
+    const [change] = await h.su.collection('pending_changes').getFullList({ filter: `project = "${projectId}"` });
+    expect(change).toMatchObject({ kind: 'STYLE_SUGGESTION', status: 'PENDING' });
+    expect(change!.payload.evidence.length).toBeGreaterThan(0);
+    const after = await h.su.collection('projects').getOne(projectId);
+    expect(after.style_matrix.sentence_structure).toBe(before.style_matrix.sentence_structure);
+    expect(after.sample_text).toContain(words[0]);
+    expect((await u.api('POST', `/pending-changes/${change!.id}/accept`)).status).toBe(200);
+    expect((await u.api('POST', `/pending-changes/${change!.id}/accept`)).status).toBe(409);
+    const updated = await h.su.collection('projects').getOne(projectId);
+    expect(updated.style_matrix.stylistic_rules).toContain('Supprimer les adverbes en -ment');
   });
 });
 
@@ -310,9 +295,9 @@ describe('verrou', () => {
   });
 
   it('un job en base bloque même sans verrou mémoire', async () => {
-    const { project } = await writingProject(h, u, 1);
-    await h.su.collection('generation_jobs').create({ user: u.id, project: project.id, kind: 'SAMPLE', status: 'RUNNING', target_id: project.id });
-    expect((await u.api('POST', `/projects/${project.id}/sample`)).status).toBe(409);
+    const { project, chapters } = await writingProject(h, u, 1);
+    await h.su.collection('generation_jobs').create({ user: u.id, project: project.id, kind: 'CHAPTER', status: 'RUNNING', target_id: chapters[0]!.id });
+    expect((await u.api('POST', `/chapters/${chapters[0]!.id}/write`)).status).toBe(409);
   });
 });
 
@@ -581,7 +566,6 @@ describe('tranche 4 : studio', () => {
     const r = await poor.api('POST', `/chapters/${chapters[0]!.id}/write`);
     expect(r.status).toBe(402);
     expect(r.body.message).toMatch(/Budget mensuel atteint/);
-    expect((await poor.api('POST', `/projects/${project.id}/sample`)).status).toBe(402);
     expect(h.mock.requests.length).toBe(before);
     expect((await poor.api('GET', '/me/usage')).body).toMatchObject({ spent_usd: 1 });
   });
@@ -693,14 +677,12 @@ describe('garde-fou', () => {
     await h.su.collection('chapters').update(chapter.id, { status: 'GENERATING' });
     const stuck = await h.su.collection('scenes').create({ chapter: chapter.id, scene_number: 1, status: 'GENERATING', draft: 'moitié', beat: 'b' });
     const kept = await h.su.collection('scenes').create({ chapter: chapter.id, scene_number: 2, status: 'GENERATING', draft: 'x', content: 'ancien', beat: 'b' });
-    await h.su.collection('projects').update(project.id, { sample_draft: 'moitié' });
     const j = await h.su.collection('generation_jobs').create({ user: u.id, project: project.id, kind: 'CHAPTER', status: 'RUNNING', target_id: chapter.id });
     await h.deps.jobs.recoverOnStartup();
     expect(await h.su.collection('generation_jobs').getOne(j.id)).toMatchObject({ status: 'FAILED', error_message: 'Serveur redémarré' });
     expect(await h.su.collection('scenes').getOne(stuck.id)).toMatchObject({ status: 'PENDING', draft: '' });
     expect(await h.su.collection('scenes').getOne(kept.id)).toMatchObject({ status: 'REVIEW', draft: '', content: 'ancien' });
     expect((await h.su.collection('chapters').getOne(chapter.id)).status).toBe('REVIEW');
-    expect((await h.su.collection('projects').getOne(project.id)).sample_draft).toBe('');
   });
 
   it('le watchdog interrompt un job trop long', async () => {
@@ -866,8 +848,8 @@ describe('écriture automatique du livre', () => {
     expect((await other.api('POST', `/projects/${project.id}/write-all`)).status).toBe(404);
   });
 
-  it('refuse avant la validation de l’échantillon, et sur un livre fini', async () => {
-    const early = await writingProject(h, u, 1, 1100, { status: 'STEP_4_SAMPLE_REVIEW' });
+  it('refuse avant le passage à la rédaction, et sur un livre fini', async () => {
+    const early = await writingProject(h, u, 1, 1100, { status: 'STEP_3_OUTLINE_REVIEW' });
     expect((await u.api('POST', `/projects/${early.project.id}/write-all`)).status).toBe(409);
     const { project } = await writingProject(h, u, 1, 1100);
     await job(h, await start(project.id));

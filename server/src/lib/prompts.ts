@@ -10,7 +10,6 @@ export const PROMPT_VERSIONS = {
   style_invent: 'v1',
   concept: 'v1',
   outline: 'v1',
-  sample: 'v1',
   scene_plan: 'v1',
   ghostwriter_system: 'v1',
   scene_write: 'v1',

@@ -13,7 +13,7 @@ import { useProjectStore } from '@/store/useProjectStore';
 
 const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? 's' : ''}`;
 
-/** Proposée dès l'échantillon validé. L'estimation se recalcule quand l'état des chapitres change. */
+/** Proposée dès le premier chapitre validé. L'estimation se recalcule quand l'état des chapitres change. */
 export function AutoWriteCard({ project }: { project: Project }) {
   const chaptersKey = useProjectStore((s) => s.chapters.map((c) => c.status).join());
   const pendingChanges = useProjectStore((s) => s.changes.length);
@@ -31,7 +31,7 @@ export function AutoWriteCard({ project }: { project: Project }) {
   }, [project.id, chaptersKey]);
 
   const free = estimate !== null && estimate.cost_high_usd === 0;
-  const overBudget = estimate !== null && estimate.cost_high_usd > estimate.budget_left_usd;
+  const overBudget = estimate !== null && estimate.budget_left_usd !== null && estimate.cost_high_usd > estimate.budget_left_usd;
 
   return (
     <Card className="space-y-3 border-accent/25 bg-surface/60 p-4">
@@ -71,7 +71,7 @@ export function AutoWriteCard({ project }: { project: Project }) {
         </div>
       )}
 
-      {overBudget && (
+      {overBudget && estimate.budget_left_usd !== null && (
         <p className="text-xs text-stale">
           {estimate.cost_low_usd > estimate.budget_left_usd ? 'Cette estimation dépasse' : 'Le haut de cette fourchette dépasse'} ce qu'il reste de votre budget du mois ({formatUsd(estimate.budget_left_usd)}). L'écriture s'arrêtera une fois le budget atteint, et les chapitres déjà validés seront conservés.
         </p>

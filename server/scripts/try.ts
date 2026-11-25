@@ -10,7 +10,7 @@ import { parseArgs } from 'node:util';
 import { loadAiEnv } from '../src/config/env.js';
 import { loadPrompt, renderTemplate } from '../src/lib/prompts.js';
 import { bibleWithIds, toStyleSuggestion } from '../src/services/bible.service.js';
-import { buildSampleContext, buildSceneContext, formatBibleWithIds, formatReferenceMemory, formatStyleMatrix, type ProjectContext, type TextBlock } from '../src/services/context.service.js';
+import { buildSceneContext, formatBibleWithIds, formatReferenceMemory, formatStyleMatrix, type ProjectContext, type TextBlock } from '../src/services/context.service.js';
 import { LlmService, type AiCallEntry, type CallContext, type Purpose } from '../src/services/llm.service.js';
 import { computeDiff } from '../src/services/memory.service.js';
 import { ModelCatalog } from '../src/services/models.service.js';
@@ -32,6 +32,10 @@ if (!values.ideas) {
 }
 
 const env = loadAiEnv();
+if (!env.OPENROUTER_API_KEY.trim()) {
+  console.error('OPENROUTER_API_KEY est requise pour exécuter ce script CLI.');
+  process.exit(1);
+}
 const quiet = { info() {}, warn: (o: object, m?: string) => console.warn(m, o), error: (o: object, m?: string) => console.error(m, o) };
 const catalog = new ModelCatalog();
 await catalog.load(env.OPENROUTER_BASE_URL, quiet);
@@ -114,15 +118,8 @@ const project: ProjectContext = {
 };
 const ghost = loadPrompt('ghostwriter_system').text;
 
-console.log('4. Échantillon');
+console.log('4. Chapitre 1 en scènes (sert d’échantillon)');
 const first = chapters[0]!;
-const sampleCtx = buildSampleContext({
-  templates: { system: ghost, objective: loadPrompt('sample').text }, project, outline: chapters, chapter: first,
-});
-const sample = await write('sample', sampleCtx.system, sampleCtx.user);
-save('4-echantillon.md', sample);
-
-console.log('5. Chapitre 1 en scènes');
 const target = Number(values.words);
 const count = defaultSceneCount(target);
 const plan = await structured('scene_plan', env.AI_MODEL_FAST, renderTemplate(loadPrompt('scene_plan').text, {
@@ -132,23 +129,23 @@ const plan = await structured('scene_plan', env.AI_MODEL_FAST, renderTemplate(lo
 const written: string[] = [];
 for (const scene of normalizeScenePlan(plan, count, target)) {
   const context = buildSceneContext({
-    templates: { system: ghost, objective: loadPrompt('scene_write').text }, project, sampleText: sample, outline: chapters,
+    templates: { system: ghost, objective: loadPrompt('scene_write').text }, project, sampleText: '', outline: chapters,
     previousChapters: [], memoryTokenLimit: catalog.memoryLimit(env.AI_MODEL_CREATIVE, 100_000), chapter: first, writtenScenes: written, scene,
   });
   written.push(await write('scene_write', context.system, context.user));
 }
 const chapter = written.join('\n\n');
 console.log(`  chapitre : ${countWords(chapter)} mots pour une cible de ${target}`);
-save('5-chapitre-1.md', chapter);
+save('4-chapitre-1.md', chapter);
 
 if (values.edit) {
-  console.log('6. Diff et suggestion de style');
-  const diff = computeDiff(sample, readFileSync(values.edit, 'utf8'));
+  console.log('5. Diff et suggestion de style');
+  const diff = computeDiff(chapter, readFileSync(values.edit, 'utf8'));
   console.log(`  ${diff.changedPercent.toFixed(1)} % de mots modifiés`);
   const learned = await structured('style_learning', env.AI_MODEL_FAST, renderTemplate(loadPrompt('style_learning').text, {
     style_matrix: formatStyleMatrix(style), changed_percent: Math.round(diff.changedPercent),
     pairs: diff.pairs.slice(0, 60).map((p) => `- Avant : « ${p.before} »\n  Après : « ${p.after} »`).join('\n'),
   }), AiStyleLearningSchema);
-  save('6-suggestion.md', JSON.stringify(toStyleSuggestion(learned, diff.pairs.slice(0, 3)), null, 2));
+  save('5-suggestion.md', JSON.stringify(toStyleSuggestion(learned, diff.pairs.slice(0, 3)), null, 2));
 }
 console.log(`Coût total : ${total.toFixed(4)} $`);

@@ -14,7 +14,6 @@ import { cn } from '@/lib/utils';
 const JOB_LABELS: Record<Job['kind'], string> = {
   ANALYZE: 'Analyse en cours',
   OUTLINE: 'Création de la trame',
-  SAMPLE: "Rédaction de l'échantillon",
   CHAPTER: 'Écriture du chapitre',
   SCENE: 'Régénération de la scène',
   BOOK: 'Écriture automatique du livre',
@@ -23,7 +22,6 @@ const JOB_LABELS: Record<Job['kind'], string> = {
 const SIMPLE_JOB_LABELS: Record<Job['kind'], string> = {
   ANALYZE: 'Préparation du résumé de votre histoire',
   OUTLINE: 'Création du plan de vos chapitres',
-  SAMPLE: 'Rédaction de vos premières pages',
   CHAPTER: 'Écriture de votre chapitre en cours',
   SCENE: 'Réécriture du passage en cours',
   BOOK: 'Écriture automatique de votre livre',
@@ -32,7 +30,6 @@ const SIMPLE_JOB_LABELS: Record<Job['kind'], string> = {
 const FAILED_LABELS: Record<Job['kind'], string> = {
   ANALYZE: "L'analyse a échoué",
   OUTLINE: "Le plan des chapitres n'a pas pu être créé",
-  SAMPLE: "L'échantillon n'a pas pu être rédigé",
   CHAPTER: "L'écriture du chapitre a échoué",
   SCENE: 'La régénération de la scène a échoué',
   BOOK: "L'écriture automatique s'est arrêtée",
@@ -43,7 +40,6 @@ const STAGE_LABELS: Record<StageKey, string> = {
   style: 'Style',
   concept: 'Concept',
   outline: 'Trame',
-  sample: 'Échantillon',
   plan: 'Plans des scènes',
   write: 'Rédaction',
   memory: 'Résumés et mémoire',

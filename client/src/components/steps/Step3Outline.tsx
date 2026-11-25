@@ -5,6 +5,7 @@ import { ArrowRight, GripVertical, Lock, Plus, RefreshCw, ShieldCheck, Trash2 } 
 import { useEffect, useState } from 'react';
 import { pb } from '@/api/pocketbase';
 import { api } from '@/api/server';
+import { AiFeedbackCard } from '@/components/steps/AiFeedbackCard';
 import { Button } from '@/components/ui/button';
 import { Badge, Card } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
@@ -125,7 +126,10 @@ function ChapterCard({
 export function Step3Outline({ project }: { project: Project }) {
   const chapters = useProjectStore((s) => s.chapters);
   const load = useProjectStore((s) => s.loadChapters);
+  const setStep = useProjectStore((s) => s.setStep);
+  const setActiveChapter = useProjectStore((s) => s.setActiveChapter);
   const job = useProjectStore((s) => s.activeJob);
+  const [correctionFeedback, setCorrectionFeedback] = useState('');
   const [feedback, setFeedback] = useState('');
   const [newTitle, setNewTitle] = useState('');
   const [regenOpen, setRegenOpen] = useState(false);
@@ -211,24 +215,53 @@ export function Step3Outline({ project }: { project: Project }) {
         </Button>
       </form>
 
+      <AiFeedbackCard
+        title="Demander des correctifs à l'IA sur la trame"
+        description="Décrivez les ajustements souhaités sur le plan proposé ci-dessus. Les chapitres protégés ou déjà engagés sont conservés comme contraintes."
+        placeholder="Ex. : « Plus de tension au milieu », « Fusionne les chapitres 3 et 4 », « Développe davantage tel personnage »…"
+        actionLabel="Appliquer les correctifs à la trame"
+        loadingLabel="Correction de la trame…"
+        value={correctionFeedback}
+        onChange={setCorrectionFeedback}
+        disabled={busy || running}
+        loading={doing === 'outline' || job?.kind === 'OUTLINE'}
+        onSubmit={() =>
+          void run(async () => {
+            await flushAllAutosaves();
+            await api.outline(project.id, correctionFeedback.trim());
+            setCorrectionFeedback('');
+          }, 'outline')
+        }
+      />
+
       <ErrorNote error={error} />
 
       <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-card/95 p-3 shadow-md backdrop-blur">
         <Button variant="secondary" disabled={busy || running} onClick={() => setRegenOpen(true)}>
           <RefreshCw size={15} /> Régénérer la trame…
         </Button>
-        <Button
-          variant="primary"
-          disabled={busy || running || chapters.length === 0}
-          onClick={() =>
-            void run(async () => {
-              await flushAllAutosaves();
-              await api.sample(project.id);
-            })
-          }
-        >
-          Rédiger l'échantillon <ArrowRight size={16} />
-        </Button>
+        {project.status === 'STEP_3_OUTLINE_REVIEW' ? (
+          <Button
+            variant="primary"
+            disabled={busy || running || chapters.length === 0}
+            onClick={() =>
+              void run(async () => {
+                await flushAllAutosaves();
+                const first = chapters[0];
+                if (!first) return;
+                await api.writeChapter(first.id);
+                setActiveChapter(first.id);
+                setStep(4);
+              })
+            }
+          >
+            Rédiger le premier chapitre <ArrowRight size={16} />
+          </Button>
+        ) : (
+          <Button variant="primary" onClick={() => setStep(4)}>
+            Aller au Studio <ArrowRight size={16} />
+          </Button>
+        )}
       </div>
 
       <Dialog

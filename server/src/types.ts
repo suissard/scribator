@@ -146,7 +146,6 @@ export type ProjectStatus =
   | 'STEP_1_INPUT'
   | 'STEP_2_CONCEPT_REVIEW'
   | 'STEP_3_OUTLINE_REVIEW'
-  | 'STEP_4_SAMPLE_REVIEW'
   | 'STEP_5_WRITING'
   | 'COMPLETED';
 
@@ -154,7 +153,6 @@ export const STATUS_ORDER: ProjectStatus[] = [
   'STEP_1_INPUT',
   'STEP_2_CONCEPT_REVIEW',
   'STEP_3_OUTLINE_REVIEW',
-  'STEP_4_SAMPLE_REVIEW',
   'STEP_5_WRITING',
   'COMPLETED',
 ];
@@ -178,8 +176,6 @@ export interface ProjectRecord {
   story_bible: StoryBible | null;
   reformulated_concept: string;
   sample_text: string;
-  sample_ai_original: string;
-  sample_draft: string;
   archived_synopsis: string;
   synopsis_covers_up_to: number;
 }
@@ -221,7 +217,7 @@ export interface JobRecord {
   id: string;
   user: string;
   project: string;
-  kind: 'ANALYZE' | 'OUTLINE' | 'SAMPLE' | 'CHAPTER' | 'SCENE' | 'BOOK';
+  kind: 'ANALYZE' | 'OUTLINE' | 'CHAPTER' | 'SCENE' | 'BOOK';
   target_id: string;
   status: 'RUNNING' | 'DONE' | 'CANCELLED' | 'FAILED';
   cancel_requested: boolean;

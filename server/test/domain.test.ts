@@ -177,7 +177,13 @@ describe('DraftWriter', () => {
 });
 
 describe('configuration des modèles', () => {
-  const base = { OPENROUTER_API_KEY: 'k', POCKETBASE_URL: 'http://127.0.0.1:1', PB_SUPERUSER_EMAIL: 'a@b.fr', PB_SUPERUSER_PASSWORD: 'p' };
+  const base = {
+    OPENROUTER_API_KEY: 'k',
+    API_KEY_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    POCKETBASE_URL: 'http://127.0.0.1:1',
+    PB_SUPERUSER_EMAIL: 'a@b.fr',
+    PB_SUPERUSER_PASSWORD: 'p',
+  };
 
   it('n’impose aucun modèle : sans choix, le serveur nomme ce qui manque', () => {
     expect(() => loadEnv(base)).toThrow(/AI_MODEL_CREATIVE, AI_MODEL_FAST/);

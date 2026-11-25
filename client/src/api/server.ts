@@ -46,12 +46,31 @@ async function request(method: string, path: string, body?: unknown): Promise<Re
 
 const json = async <T>(method: string, path: string, body?: unknown) => (await (await request(method, path, body)).json()) as T;
 
-export interface Usage { spent_usd: number; budget_usd: number }
+export interface Usage {
+  spent_usd: number;
+  budget_usd: number;
+  using_own_key?: boolean;
+  server_fallback_available?: boolean;
+}
+
+export interface UserKeyStatus {
+  configured: boolean;
+  hint: string | null;
+  updated_at: string | null;
+  server_fallback_available: boolean;
+}
+
+export interface UserKeyValidation {
+  ok: true;
+  label: string | null;
+  limit_remaining: number | null;
+  is_free_tier: boolean | null;
+}
 
 export interface BookEstimate {
   chapters: number; plans: number; scenes: number; rewrites: number; duration_ms: number; basis: 'history' | 'default';
   model: string; input_tokens: number; cacheable_tokens: number; output_tokens: number;
-  cost_low_usd: number; cost_high_usd: number; budget_left_usd: number;
+  cost_low_usd: number; cost_high_usd: number; budget_left_usd: number | null;
 }
 
 export interface UsageTotals {
@@ -70,8 +89,6 @@ const realApi = {
   setModel: (id: string, model: string) => json('PATCH', `/projects/${id}/model`, { model }),
   analyze: (id: string, feedback?: string) => json<{ jobId: string }>('POST', `/projects/${id}/analyze`, { feedback }),
   outline: (id: string, userFeedback?: string) => json<{ jobId: string }>('POST', `/projects/${id}/outline`, { userFeedback }),
-  sample: (id: string) => json<{ jobId: string }>('POST', `/projects/${id}/sample`, {}),
-  approveSample: (id: string) => json('POST', `/projects/${id}/sample/approve`, {}),
   writeAll: (id: string) => json<{ jobId: string }>('POST', `/projects/${id}/write-all`, {}),
   estimate: (id: string) => json<BookEstimate>('GET', `/projects/${id}/estimate`),
   report: (id: string) => json<GenerationReport>('GET', `/projects/${id}/report`),
@@ -80,9 +97,9 @@ const realApi = {
   addChapter: (id: string, title: string) => json('POST', `/projects/${id}/chapters`, { title }),
   deleteChapter: (id: string) => json('DELETE', `/chapters/${id}`),
   reorder: (projectId: string, orderedIds: string[]) => json('POST', '/chapters/reorder', { projectId, orderedIds }),
-  planScenes: (id: string) => json('POST', `/chapters/${id}/plan-scenes`, {}),
+  planScenes: (id: string, feedback?: string) => json('POST', `/chapters/${id}/plan-scenes`, feedback ? { feedback } : {}),
   writeChapter: (id: string) => json<{ jobId: string }>('POST', `/chapters/${id}/write`, {}),
-  rewriteChapter: (id: string) => json<{ jobId: string }>('POST', `/chapters/${id}/rewrite`, {}),
+  rewriteChapter: (id: string, instructions?: string) => json<{ jobId: string }>('POST', `/chapters/${id}/rewrite`, instructions ? { instructions } : {}),
   approveChapter: (id: string) => json('POST', `/chapters/${id}/approve`, {}),
   reopenChapter: (id: string) => json('POST', `/chapters/${id}/reopen`, {}),
   refreshMemory: (id: string) => json('POST', `/chapters/${id}/refresh-memory`, {}),
@@ -93,6 +110,10 @@ const realApi = {
   rejectChange: (id: string) => json('POST', `/pending-changes/${id}/reject`, {}),
   restoreVersion: (id: string) => json('POST', `/versions/${id}/restore`, {}),
   usage: () => json<Usage>('GET', '/me/usage'),
+  getOpenRouterKey: () => json<UserKeyStatus>('GET', '/me/openrouter-key'),
+  setOpenRouterKey: (apiKey: string) => json<UserKeyStatus>('PUT', '/me/openrouter-key', { apiKey }),
+  testOpenRouterKey: () => json<UserKeyValidation>('POST', '/me/openrouter-key/test', {}),
+  deleteOpenRouterKey: () => json<UserKeyStatus>('DELETE', '/me/openrouter-key'),
   acceptTerms: () => json('POST', '/me/accept-terms', {}),
   async exportBook(id: string, format: 'md' | 'docx' | 'epub', aiNotice: boolean): Promise<void> {
     const res = await request('GET', `/projects/${id}/export?format=${format}&aiNotice=${aiNotice}`);

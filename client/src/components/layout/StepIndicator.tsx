@@ -7,9 +7,8 @@ const STEPS: Array<{ view: StepView; label: string }> = [
   { view: 1, label: 'Paramètres' },
   { view: 2, label: 'Concept' },
   { view: 3, label: 'Trame' },
-  { view: 4, label: 'Échantillon' },
-  { view: 5, label: 'Studio' },
-  { view: 6, label: 'Export' },
+  { view: 4, label: 'Studio' },
+  { view: 5, label: 'Export' },
 ];
 
 export const maxStep = (status: ProjectStatus) => (STATUS_ORDER.indexOf(status) + 1) as StepView;
@@ -20,7 +19,7 @@ export function StepIndicator({ status, active, onSelect }: { status: ProjectSta
     <nav aria-label="Étapes du projet" className="flex gap-1 overflow-x-auto border-b border-line bg-card px-4 py-2">
       {STEPS.map(({ view, label }) => {
         // L'export reste accessible dès qu'il y a un studio : on peut exporter un livre inachevé.
-        const enabled = view <= unlocked || (view === 6 && unlocked >= 5);
+        const enabled = view <= unlocked || (view === 5 && unlocked >= 4);
         return (
           <button
             key={view}

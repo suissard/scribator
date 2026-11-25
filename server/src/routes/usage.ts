@@ -9,10 +9,18 @@ export function usageRoutes(app: FastifyInstance, deps: Deps): void {
   const { pb, env, llm } = deps;
   const auth = authenticate(env);
 
-  app.get('/me/usage', { preHandler: auth }, async (req) => ({
-    spent_usd: await monthlySpend(pb, req.user.id),
-    budget_usd: req.user.monthly_budget_usd,
-  }));
+  app.get('/me/usage', { preHandler: auth }, async (req) => {
+    const [spent_usd, using_own_key] = await Promise.all([
+      monthlySpend(pb, req.user.id),
+      deps.userKeys.hasPersonalKey(req.user.id),
+    ]);
+    return {
+      spent_usd,
+      budget_usd: req.user.monthly_budget_usd,
+      using_own_key,
+      server_fallback_available: deps.userKeys.serverFallbackAvailable,
+    };
+  });
 
   app.post('/me/accept-terms', { preHandler: auth }, async (req) => {
     const accepted_terms_at = new Date().toISOString().replace('T', ' ');

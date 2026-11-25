@@ -28,12 +28,12 @@ Le simulateur (`server/scripts/mock-openrouter.ts`) passe par le vrai SDK et rep
 | Le fichier de référence est supprimé après l'analyse | ✅ | Test d'intégration |
 | Fermer l'onglet pendant l'analyse puis revenir affiche le résultat | Partiel | Le job est indépendant de la requête et l'état est rechargé à l'ouverture, mais le scénario n'a pas été joué tel quel |
 
-## Tranche 3 : trame et échantillon
+## Tranche 3 : trame et premier chapitre (échantillon)
 
 | Critère | État | Preuve |
 |---|---|---|
 | Régénérer la trame conserve un chapitre retouché | ✅ | Test d'intégration |
-| Échantillon inchangé dans TipTap : diff de 0 % | ✅ | Essai dans un vrai navigateur sur un texte riche, qui a révélé un faux positif corrigé |
+| Chapitre inchangé dans TipTap : diff de 0 % | ✅ | Essai dans un vrai navigateur sur un texte riche, qui a révélé un faux positif corrigé |
 | Correction de plus de 5 % : suggestion avec exemples | 🤖 | Test d'intégration et navigateur |
 | Double clic : une seule exécution, `409` sur le second | ✅ | Tests sur une route job et sur `outline` |
 
@@ -52,7 +52,7 @@ Le simulateur (`server/scripts/mock-openrouter.ts`) passe par le vrai SDK et rep
 
 | Critère | État | Preuve |
 |---|---|---|
-| Un livre s'écrit, se valide et se clôt seul après l'échantillon | 🤖 | Tests d'intégration et navigateur, sur le simulateur |
+| Un livre s'écrit, se valide et se clôt seul après le premier chapitre | 🤖 | Tests d'intégration et navigateur, sur le simulateur |
 | Arrêter puis relancer reprend sans refaire ce qui est fait | 🤖 | Test d'intégration et navigateur |
 | « Tout écrire » refait les chapitres écrits mais non validés, sans toucher aux chapitres validés | 🤖 | Tests d'intégration et navigateur |
 | « Réécrire le chapitre » refait plan et texte, garde l'ancien dans l'historique, et ne touche à rien si le plan échoue | 🤖 | Tests d'intégration |

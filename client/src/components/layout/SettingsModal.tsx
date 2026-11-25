@@ -6,6 +6,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { useUiMode, type FontScale, type UiMode } from '@/lib/uiMode';
 import { cn } from '@/lib/utils';
 import { MockToggle } from './MockToggle';
+import { OpenRouterKeySection } from './OpenRouterKeySection';
 
 const MODES: Array<{ id: UiMode; title: string; desc: string }> = [
   {
@@ -100,6 +101,8 @@ export function SettingsModal() {
               })}
             </div>
           </div>
+
+          <OpenRouterKeySection open={open} />
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
             <div className="flex flex-wrap items-center gap-3">

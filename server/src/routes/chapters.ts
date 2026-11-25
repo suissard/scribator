@@ -15,7 +15,7 @@ export function chapterRoutes(app: FastifyInstance, deps: Deps): void {
   type C = { Params: { id: string } };
 
   const assertWriting = (p: ProjectRecord) => {
-    if (p.status !== 'STEP_5_WRITING') throw conflict("Valide d'abord l'échantillon.");
+    if (p.status !== 'STEP_5_WRITING') throw conflict("Commence d'abord la rédaction depuis la trame.");
   };
 
   async function renumber(ids: string[]): Promise<void> {
@@ -30,9 +30,15 @@ export function chapterRoutes(app: FastifyInstance, deps: Deps): void {
     }
   }
 
-  async function launchChapterJob(req: FastifyRequest, chapter: ChapterRecord, run: (job: JobHandle) => Promise<void>): Promise<string> {
+  async function launchChapterJob(
+    req: FastifyRequest,
+    chapter: ChapterRecord,
+    run: (job: JobHandle) => Promise<void>,
+    enterWriting = false,
+  ): Promise<string> {
     await guardedJob(deps, req, chapter.project);
     try {
+      if (enterWriting) await pb.collection('projects').update(chapter.project, { status: 'STEP_5_WRITING' });
       await pb.collection('chapters').update(chapter.id, { status: 'GENERATING' });
     } catch (e) {
       locks.release(chapter.project);
@@ -52,17 +58,23 @@ export function chapterRoutes(app: FastifyInstance, deps: Deps): void {
 
   app.post<C>('/chapters/:id/plan-scenes', aiRoute(auth), async (req) => {
     const chapter = await getOwned<ChapterRecord>(req, 'chapters', req.params.id);
+    const { feedback } = z.object({ feedback: z.string().max(5000).optional() }).parse(req.body ?? {});
     assertWriting(await gen.getProject(chapter.project));
     if (['GENERATING', 'APPROVED', 'STALE'].includes(chapter.status)) {
       throw conflict('Ce chapitre ne peut pas être replanifié dans son état actuel.');
     }
-    await guardedAi(deps, req, chapter.project, () => gen.planScenes(callContext(req, chapter.project), chapter));
+    await guardedAi(deps, req, chapter.project, () => gen.planScenes(callContext(req, chapter.project), chapter, undefined, feedback));
     return { scenes: await gen.listScenes(chapter.id) };
   });
 
   app.post<C>('/chapters/:id/write', aiRoute(auth), async (req, reply) => {
     const chapter = await getOwned<ChapterRecord>(req, 'chapters', req.params.id);
-    assertWriting(await gen.getProject(chapter.project));
+    const project = await gen.getProject(chapter.project);
+    if (project.status === 'STEP_3_OUTLINE_REVIEW') {
+      if (chapter.chapter_number !== 1) throw conflict('Commence par le premier chapitre.');
+    } else {
+      assertWriting(project);
+    }
     await assertPreviousApproved(chapter);
     if (['GENERATING', 'APPROVED', 'STALE'].includes(chapter.status)) {
       throw conflict('Ce chapitre ne peut pas être généré dans son état actuel.');
@@ -71,16 +83,17 @@ export function chapterRoutes(app: FastifyInstance, deps: Deps): void {
     if (chapter.status === 'REVIEW' && !scenes.some((s) => s.status === 'PENDING')) {
       throw conflict('Toutes les scènes sont déjà écrites. Régénère une scène ou valide le chapitre.');
     }
-    const jobId = await launchChapterJob(req, chapter, (job) => gen.writeChapter(job, chapter.id));
+    const jobId = await launchChapterJob(req, chapter, (job) => gen.writeChapter(job, chapter.id), project.status === 'STEP_3_OUTLINE_REVIEW');
     return reply.code(202).send({ jobId });
   });
 
   app.post<C>('/chapters/:id/rewrite', aiRoute(auth), async (req, reply) => {
     const chapter = await getOwned<ChapterRecord>(req, 'chapters', req.params.id);
+    const { instructions } = z.object({ instructions: z.string().max(5000).optional() }).parse(req.body ?? {});
     assertWriting(await gen.getProject(chapter.project));
     await assertPreviousApproved(chapter);
     if (chapter.status !== 'REVIEW') throw conflict('Rouvre ce chapitre avant de le réécrire.');
-    const jobId = await launchChapterJob(req, chapter, (job) => gen.rewriteChapter(job, chapter.id));
+    const jobId = await launchChapterJob(req, chapter, (job) => gen.rewriteChapter(job, chapter.id, instructions));
     return reply.code(202).send({ jobId });
   });
 

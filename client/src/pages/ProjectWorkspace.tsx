@@ -8,7 +8,6 @@ import { SimpleStepper, SimpleWorkspace } from '@/components/simple/SimpleWorksp
 import { Step1Input } from '@/components/steps/Step1Input';
 import { Step2Concept } from '@/components/steps/Step2Concept';
 import { Step3Outline } from '@/components/steps/Step3Outline';
-import { Step4Sample } from '@/components/steps/Step4Sample';
 import { Step5Studio } from '@/components/steps/Step5Studio';
 import { Step6Export } from '@/components/steps/Step6Export';
 import { pb } from '@/api/pocketbase';
@@ -17,7 +16,7 @@ import type { Chapter, Job, PendingChange, Project, Scene } from '@/lib/types';
 import { log } from '@/lib/logger';
 import { toastError } from '@/lib/toast';
 import { useUiMode } from '@/lib/uiMode';
-import { useProjectStore } from '@/store/useProjectStore';
+import { useProjectStore, type StepView } from '@/store/useProjectStore';
 
 export function ProjectWorkspace() {
   const { id = '' } = useParams();
@@ -83,12 +82,12 @@ export function ProjectWorkspace() {
     if (!project || project.status === shownStatus.current) return;
     shownStatus.current = project.status;
     log.info(`Projet : statut ${project.status}`);
-    useProjectStore.getState().setStep(Math.min(maxStep(project.status), project.status === 'COMPLETED' ? 6 : 5) as 1);
+    useProjectStore.getState().setStep(Math.min(maxStep(project.status), project.status === 'COMPLETED' ? 5 : 4) as StepView);
   }, [project]);
 
   // Le statut ne change qu'à la fin du job : il faut pourtant être sur l'étape pour suivre le travail.
   useEffect(() => {
-    if (activeJob?.kind === 'SAMPLE') useProjectStore.getState().setStep(4);
+    if (activeJob?.kind === 'CHAPTER') useProjectStore.getState().setStep(4);
     if (activeJob?.kind === 'OUTLINE') useProjectStore.getState().setStep(3);
   }, [activeJob?.kind]);
 
@@ -125,9 +124,8 @@ export function ProjectWorkspace() {
           {activeStepView === 1 && <Step1Input key={project.id} project={project} />}
           {activeStepView === 2 && <Step2Concept project={project} />}
           {activeStepView === 3 && <Step3Outline project={project} />}
-          {activeStepView === 4 && <Step4Sample project={project} />}
-          {activeStepView === 5 && <Step5Studio project={project} />}
-          {activeStepView === 6 && <Step6Export project={project} />}
+          {activeStepView === 4 && <Step5Studio project={project} />}
+          {activeStepView === 5 && <Step6Export project={project} />}
         </>
       )}
     </AppShell>

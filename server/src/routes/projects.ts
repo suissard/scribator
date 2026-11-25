@@ -1,12 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { callContext, guardedAi, guardedJob, type Deps } from '../deps.js';
+import { guardedJob, type Deps } from '../deps.js';
 import { authenticate, getOwned } from '../middlewares/auth.js';
 import { badRequest, conflict, forbidden } from '../lib/errors.js';
 import { monthlySpend } from '../middlewares/budget.js';
 import { PartialStyleSchema } from '../services/bible.service.js';
-import { allApproved, computeDiff, STYLE_DIFF_THRESHOLD_PERCENT } from '../services/memory.service.js';
-import { countWords } from '../services/parser.service.js';
+import { allApproved } from '../services/memory.service.js';
 import { estimateBookDuration } from '../services/stats.service.js';
 import { archiveVersion } from '../services/versions.service.js';
 import { STATUS_ORDER, StoryBibleSchema, type ProjectRecord, type ProjectStatus, type StyleMatrix } from '../types.js';
@@ -54,53 +53,9 @@ export function projectRoutes(app: FastifyInstance, deps: Deps): void {
     return reply.code(202).send({ jobId });
   });
 
-  app.post<P>('/projects/:id/sample', aiRoute(auth), async (req, reply) => {
-    const project = await getOwned<ProjectRecord>(req, 'projects', req.params.id);
-    if (!atLeast(project.status, 'STEP_3_OUTLINE_REVIEW')) throw conflict("Valide d'abord le concept et la trame.");
-    await guardedJob(deps, req, project.id);
-    const jobId = await jobs.launch({
-      userId: req.user.id, projectId: project.id, kind: 'SAMPLE', targetId: project.id,
-      requestId: req.id, logger: req.log,
-      run: (job) => gen.writeSample(job, project.id),
-    });
-    return reply.code(202).send({ jobId });
-  });
-
-  app.post<P>('/projects/:id/sample/approve', aiRoute(auth), async (req) => {
-    const owned = await getOwned<ProjectRecord>(req, 'projects', req.params.id);
-    if (owned.status !== 'STEP_4_SAMPLE_REVIEW') throw conflict("L'échantillon n'est pas en attente de validation.");
-    return guardedAi(deps, req, owned.id, async () => {
-      const project = await gen.getProject(owned.id); // relu sous verrou : dernière frappe de l'auteur
-      if (project.status !== 'STEP_4_SAMPLE_REVIEW') throw conflict("L'échantillon est déjà validé.");
-      if (!project.sample_text.trim()) throw badRequest("L'échantillon est vide.");
-      const first = (await gen.listChapters(project.id))[0];
-      if (!first) throw badRequest('La trame est vide.');
-
-      const diff = computeDiff(project.sample_ai_original, project.sample_text);
-      if (diff.changedPercent > STYLE_DIFF_THRESHOLD_PERCENT && project.style_matrix) {
-        const suggestion = await gen.styleLearning(callContext(req, project.id), project.style_matrix, diff);
-        if (suggestion) await gen.proposeChange(project.id, 'STYLE_SUGGESTION', suggestion);
-      }
-      // L'original de la scène est le texte validé : les corrections déjà apprises ici
-      // ne doivent pas être comptées une seconde fois à la validation du chapitre.
-      await pb.collection('scenes').create({
-        chapter: first.id,
-        scene_number: 1,
-        beat: first.brief_summary,
-        target_words: countWords(project.sample_text),
-        content: project.sample_text,
-        ai_original_content: project.sample_text,
-        status: 'REVIEW',
-      });
-      await pb.collection('chapters').update(first.id, { status: 'PLANNED' });
-      await pb.collection('projects').update(project.id, { status: 'STEP_5_WRITING' });
-      return { changedPercent: diff.changedPercent };
-    });
-  });
-
   app.post<P>('/projects/:id/write-all', aiRoute(auth), async (req, reply) => {
     const project = await getOwned<ProjectRecord>(req, 'projects', req.params.id);
-    if (project.status !== 'STEP_5_WRITING') throw conflict("Valide d'abord l'échantillon.");
+    if (project.status !== 'STEP_5_WRITING') throw conflict("Commence d'abord par le premier chapitre.");
     if (allApproved(await gen.listChapters(project.id))) throw conflict('Tous les chapitres sont déjà validés.');
     await guardedJob(deps, req, project.id);
     const jobId = await jobs.launch({
@@ -114,14 +69,18 @@ export function projectRoutes(app: FastifyInstance, deps: Deps): void {
 
   app.get<P>('/projects/:id/estimate', { preHandler: auth }, async (req) => {
     const project = await getOwned<ProjectRecord>(req, 'projects', req.params.id);
-    const [work, chapters, stages, spent] = await Promise.all([
-      gen.bookWork(project.id), gen.listChapters(project.id), stats.stageEstimates(project.id), monthlySpend(pb, req.user.id),
+    const [work, chapters, stages, spent, usingOwnKey] = await Promise.all([
+      gen.bookWork(project.id),
+      gen.listChapters(project.id),
+      stats.stageEstimates(project.id),
+      monthlySpend(pb, req.user.id),
+      deps.userKeys.hasPersonalKey(req.user.id),
     ]);
     return {
       ...estimateBookDuration({ chapters: work.todo.length, plans: work.toPlan.length + work.toRewrite.length, scenes: work.sceneCount }, stages),
       rewrites: work.toRewrite.length,
       ...gen.estimateBookCost(project, chapters, work.perChapter),
-      budget_left_usd: Math.max(0, req.user.monthly_budget_usd - spent),
+      budget_left_usd: usingOwnKey ? null : Math.max(0, req.user.monthly_budget_usd - spent),
     };
   });
 

@@ -24,6 +24,7 @@ import { api } from '@/api/server';
 import { RichTextEditor } from '@/components/editor/RichTextEditor';
 import { StreamingViewer } from '@/components/editor/StreamingViewer';
 import { maxStep } from '@/components/layout/StepIndicator';
+import { AiFeedbackCard } from '@/components/steps/AiFeedbackCard';
 import { Button } from '@/components/ui/button';
 import { Badge, Card } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
@@ -33,7 +34,7 @@ import { SpeakButton, VoiceDictationButton } from '@/components/ui/VoiceTools';
 import { flushAllAutosaves } from '@/lib/autosaveRegistry';
 import { canWriteAll } from '@/lib/bookWork';
 import { toastError, toastSuccess } from '@/lib/toast';
-import type { Chapter, ChapterStatus, Project, Scene } from '@/lib/types';
+import { STATUS_ORDER, type Chapter, type ChapterStatus, type Project, type Scene } from '@/lib/types';
 import { useAction } from '@/lib/useAction';
 import { useAutoSave } from '@/lib/useAutoSave';
 import { cn, formatNumber } from '@/lib/utils';
@@ -45,8 +46,7 @@ const SIMPLE_STEPS: Array<{ view: StepView; label: string }> = [
   { view: 1, label: '1. Mon projet' },
   { view: 2, label: '2. Le résumé' },
   { view: 3, label: '3. Les chapitres' },
-  { view: 4, label: '4. Premières pages' },
-  { view: 5, label: '5. Mon livre' },
+  { view: 4, label: '4. Mon livre' },
 ];
 
 const DEFAULT_CHAPTERS = 5;
@@ -78,7 +78,7 @@ export function SimpleStepper({
   onSelect(s: StepView): void;
 }) {
   const unlocked = maxStep(status);
-  const currentView = active === 6 ? 5 : active;
+  const currentView = active >= 4 ? 4 : active;
   return (
     <nav aria-label="Étapes de votre livre" className="border-b border-line bg-card px-4 py-2.5">
       <div className="mx-auto flex max-w-4xl flex-nowrap gap-2 overflow-x-auto">
@@ -384,15 +384,14 @@ function SimpleStep1({ project }: { project: Project }) {
 function SimpleStep2({ project }: { project: Project }) {
   const setStep = useProjectStore((s) => s.setStep);
   const [feedback, setFeedback] = useState('');
-  const [showEditDrawer, setShowEditDrawer] = useState(false);
   const { busy, doing, error, run } = useAction();
   const save = useAutoSave<string>((reformulated_concept) => pb.collection('projects').update(project.id, { reformulated_concept }));
   const job = useProjectStore((s) => s.activeJob);
   const running = job !== null;
   const outlining = job?.kind === 'OUTLINE';
+  const earlyStage = STATUS_ORDER.indexOf(project.status) <= 1;
   const refMemory = project.reference_meta?.story_memory;
   const characters = project.story_bible?.characters ?? [];
-  const drawerVisible = showEditDrawer || feedback.trim().length > 0;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-4 sm:p-6">
@@ -417,29 +416,43 @@ function SimpleStep2({ project }: { project: Project }) {
           <SpeakButton compact text={project.reformulated_concept} label="Écouter le résumé" />
         </div>
         <p className="text-sm text-muted">
-          Vous pouvez cliquer directement dans le texte ci-dessous pour le corriger, ou demander un changement à l'application.
+          Vous pouvez cliquer directement dans le texte ci-dessous pour le corriger, ou demander un correctif à l'IA juste en dessous.
         </p>
         <div className="rounded-lg border border-line bg-paper p-4">
           <RichTextEditor value={project.reformulated_concept} onChange={save} ariaLabel="Résumé de votre histoire" />
         </div>
       </Card>
 
+      {earlyStage && (
+        <AiFeedbackCard
+          simple
+          voice
+          title="Demander des correctifs à l'IA sur ce résumé"
+          description="Dictez au micro ou écrivez vos indications : l'IA ajustera le résumé et les personnages selon vos demandes."
+          placeholder="Par exemple : « Change la fin », « Ajoute le personnage de mon frère Paul »…"
+          actionLabel="Appliquer mes correctifs"
+          loadingLabel="Correction du résumé…"
+          ariaLabel="Vos consignes pour modifier le résumé"
+          value={feedback}
+          onChange={setFeedback}
+          disabled={busy || running}
+          loading={doing === 'analyze' || job?.kind === 'ANALYZE'}
+          onSubmit={() =>
+            void run(async () => {
+              await flushAllAutosaves();
+              await api.analyze(project.id, feedback.trim());
+              setFeedback('');
+            }, 'analyze')
+          }
+        />
+      )}
+
       <ErrorNote error={error} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="lg" onClick={() => setStep(1)}>
-            <ArrowLeft size={18} /> Retour
-          </Button>
-          <Button
-            variant="secondary"
-            size="lg"
-            aria-expanded={drawerVisible}
-            onClick={() => setShowEditDrawer((v) => !v)}
-          >
-            <PenLine size={18} /> Demander un changement
-          </Button>
-        </div>
+        <Button variant="ghost" size="lg" onClick={() => setStep(1)}>
+          <ArrowLeft size={18} /> Retour
+        </Button>
 
         <Button
           variant="success"
@@ -459,52 +472,6 @@ function SimpleStep2({ project }: { project: Project }) {
           {doing !== 'outline' && !outlining && <ArrowRight size={20} />}
         </Button>
       </div>
-
-      {drawerVisible && (
-        <Card className="space-y-4 border-accent/30 bg-accent-soft/25 p-5">
-          <div className="space-y-1">
-            <h2 className="font-serif text-lg font-bold">Que souhaitez-vous modifier dans ce résumé ?</h2>
-            <p className="text-sm text-muted">
-              Dictez au micro ou écrivez vos indications (par exemple : « Change la fin », « Ajoute le personnage de mon frère Paul »).
-            </p>
-          </div>
-          <VoiceDictationButton
-            compact
-            label="Dicter ma demande"
-            value={feedback}
-            onChange={setFeedback}
-          />
-          <Textarea
-            aria-label="Vos consignes pour modifier le résumé"
-            className="min-h-24 text-base"
-            placeholder="Écrivez ou dictez ici ce que vous souhaitez changer…"
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-          />
-          <div className="flex flex-wrap justify-end gap-2">
-            {!feedback.trim() && (
-              <Button variant="ghost" onClick={() => setShowEditDrawer(false)}>
-                Fermer
-              </Button>
-            )}
-            <Button
-              variant="primary"
-              size="lg"
-              disabled={busy || running || !feedback.trim()}
-              onClick={() =>
-                void run(async () => {
-                  await flushAllAutosaves();
-                  await api.analyze(project.id, feedback.trim());
-                  setFeedback('');
-                  setShowEditDrawer(false);
-                })
-              }
-            >
-              <RefreshCw size={18} /> Refaire le résumé
-            </Button>
-          </div>
-        </Card>
-      )}
 
       {characters.length > 0 && (
         <Card className="space-y-3 p-6">
@@ -647,14 +614,13 @@ function SimpleStep3({ project }: { project: Project }) {
   const chapters = useProjectStore((s) => s.chapters);
   const loadChapters = useProjectStore((s) => s.loadChapters);
   const setStep = useProjectStore((s) => s.setStep);
+  const setActiveChapter = useProjectStore((s) => s.setActiveChapter);
   const job = useProjectStore((s) => s.activeJob);
   const [feedback, setFeedback] = useState('');
   const [newTitle, setNewTitle] = useState('');
-  const [showPlanDrawer, setShowPlanDrawer] = useState(false);
   const { busy, doing, error, run } = useAction();
 
   const fullOutlineText = chapters.map((c) => `Chapitre ${c.chapter_number}, ${c.title}. ${c.brief_summary}`).join('\n\n');
-  const drawerVisible = showPlanDrawer || feedback.trim().length > 0;
   const pendingIds = chapters.filter((c) => c.status === 'PENDING').map((c) => c.id);
 
   const moveChapter = (chapterId: string, dir: -1 | 1) => {
@@ -731,182 +697,60 @@ function SimpleStep3({ project }: { project: Project }) {
         </Button>
       </form>
 
-      {drawerVisible && (
-        <Card className="space-y-4 border-accent/30 bg-accent-soft/25 p-5">
-          <div className="space-y-1">
-            <h2 className="font-serif text-lg font-bold">Demander une modification du plan</h2>
-            <p className="text-sm text-muted">
-              Les chapitres que vous avez déjà retouchés seront conservés.
-            </p>
-          </div>
-          <VoiceDictationButton
-            compact
-            label="Dicter ma demande"
-            value={feedback}
-            onChange={setFeedback}
-          />
-          <Textarea
-            aria-label="Consignes pour modifier le plan"
-            placeholder="Par exemple : « Ajoute un chapitre sur son enfance au village »…"
-            value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
-          />
-          <div className="flex flex-wrap justify-end gap-2">
-            {!feedback.trim() && (
-              <Button variant="ghost" onClick={() => setShowPlanDrawer(false)}>
-                Fermer
-              </Button>
-            )}
-            <Button
-              variant="primary"
-              size="lg"
-              disabled={busy || job !== null || !feedback.trim()}
-              loading={doing === 'outline' || job?.kind === 'OUTLINE'}
-              onClick={() =>
-                void run(async () => {
-                  await flushAllAutosaves();
-                  await api.outline(project.id, feedback.trim());
-                  setFeedback('');
-                  setShowPlanDrawer(false);
-                }, 'outline')
-              }
-            >
-              {doing !== 'outline' && <RefreshCw size={18} />} Refaire le plan
-            </Button>
-          </div>
-        </Card>
-      )}
+      <AiFeedbackCard
+        simple
+        voice
+        title="Demander des correctifs à l'IA sur le plan"
+        description="Dictez au micro ou écrivez vos ajustements. Les chapitres que vous avez déjà retouchés seront conservés."
+        placeholder="Par exemple : « Ajoute un chapitre sur son enfance au village », « Rends la fin plus joyeuse »…"
+        actionLabel="Appliquer mes correctifs au plan"
+        loadingLabel="Correction du plan…"
+        ariaLabel="Consignes pour modifier le plan"
+        value={feedback}
+        onChange={setFeedback}
+        disabled={busy || job !== null}
+        loading={doing === 'outline' || job?.kind === 'OUTLINE'}
+        onSubmit={() =>
+          void run(async () => {
+            await flushAllAutosaves();
+            await api.outline(project.id, feedback.trim());
+            setFeedback('');
+          }, 'outline')
+        }
+      />
 
       <ErrorNote error={error} />
 
       <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-card/95 p-3 shadow-md backdrop-blur">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="lg" onClick={() => setStep(2)}>
-            <ArrowLeft size={18} /> Résumé
-          </Button>
-          <Button
-            variant="secondary"
-            size="lg"
-            aria-expanded={drawerVisible}
-            onClick={() => setShowPlanDrawer((v) => !v)}
-          >
-            <PenLine size={18} /> Modifier le plan
-          </Button>
-        </div>
-
-        <Button
-          variant="primary"
-          size="xl"
-          disabled={busy || job !== null || chapters.length === 0}
-          className="w-full sm:w-auto"
-          onClick={() =>
-            void run(async () => {
-              await flushAllAutosaves();
-              await api.sample(project.id);
-            })
-          }
-        >
-          Écrire les premières pages <ArrowRight size={20} />
+        <Button variant="ghost" size="lg" onClick={() => setStep(2)}>
+          <ArrowLeft size={18} /> Résumé
         </Button>
-      </div>
-    </div>
-  );
-}
 
-function SimpleStep4({ project }: { project: Project }) {
-  const job = useProjectStore((s) => s.activeJob);
-  const setStep = useProjectStore((s) => s.setStep);
-  const [confirmRetry, setConfirmRetry] = useState(false);
-  const { busy, doing, error, run } = useAction();
-  const save = useAutoSave<string>((sample_text) => pb.collection('projects').update(project.id, { sample_text }));
-  const generating = job?.kind === 'SAMPLE';
-  const canApprove = project.status === 'STEP_4_SAMPLE_REVIEW';
-
-  const retrySample = () => {
-    setConfirmRetry(false);
-    void run(async () => {
-      await flushAllAutosaves();
-      await api.sample(project.id);
-    });
-  };
-
-  return (
-    <div className="mx-auto max-w-3xl space-y-6 p-4 sm:p-6">
-      <Card className="space-y-4 p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="font-serif text-2xl font-bold">Vos premières pages</h1>
-          {!generating && <SpeakButton compact text={project.sample_text} label="Écouter ces pages" />}
-        </div>
-        <div className="rounded-lg border border-accent/25 bg-accent-soft/40 p-3.5 text-base text-ink">
-          Lisez ou écoutez ce début. Corrigez librement le texte ci-dessous : vos retouches apprennent votre style à l'application.
-        </div>
-        <div className="rounded-lg border border-line bg-paper p-5">
-          {generating ? (
-            <StreamingViewer text={project.sample_draft} label="première scène" />
-          ) : (
-            <RichTextEditor value={project.sample_text} onChange={save} ariaLabel="Texte des premières pages" />
-          )}
-        </div>
-      </Card>
-
-      <ErrorNote error={error} />
-
-      <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="lg" onClick={() => setStep(3)}>
-            <ArrowLeft size={18} /> Chapitres
-          </Button>
+        {project.status === 'STEP_3_OUTLINE_REVIEW' ? (
           <Button
-            variant="secondary"
-            size="lg"
-            disabled={busy || generating}
-            onClick={() => setConfirmRetry(true)}
-          >
-            <RefreshCw size={18} /> Autre essai
-          </Button>
-        </div>
-
-        {canApprove ? (
-          <Button
-            variant="success"
+            variant="primary"
             size="xl"
-            disabled={busy || generating}
-            loading={doing === 'approve'}
+            disabled={busy || job !== null || chapters.length === 0}
             className="w-full sm:w-auto"
             onClick={() =>
               void run(async () => {
                 await flushAllAutosaves();
-                await api.approveSample(project.id);
-                toastSuccess('Style validé !');
-              }, 'approve')
+                const first = chapters[0];
+                if (!first) return;
+                await api.writeChapter(first.id);
+                setActiveChapter(first.id);
+                setStep(4);
+              })
             }
           >
-            {doing !== 'approve' && <Check size={20} />}
-            {doing === 'approve' ? 'Validation…' : 'Valider ce style'}
-            {doing !== 'approve' && <ArrowRight size={20} />}
+            Écrire le premier chapitre <ArrowRight size={20} />
           </Button>
         ) : (
-          <Button variant="primary" size="xl" className="w-full sm:w-auto" onClick={() => setStep(5)}>
+          <Button variant="primary" size="xl" className="w-full sm:w-auto" onClick={() => setStep(4)}>
             Continuer vers mon livre <ArrowRight size={20} />
           </Button>
         )}
       </div>
-
-      <Dialog
-        open={confirmRetry}
-        onOpenChange={setConfirmRetry}
-        title="Proposer un autre début ?"
-        description="Le texte actuel de ces premières pages (ainsi que vos éventuelles corrections) sera remplacé."
-      >
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="secondary" onClick={() => setConfirmRetry(false)}>
-            Annuler
-          </Button>
-          <Button variant="primary" onClick={retrySample}>
-            Proposer un autre début
-          </Button>
-        </div>
-      </Dialog>
     </div>
   );
 }
@@ -943,7 +787,6 @@ function SimpleStep5Book({ project }: { project: Project }) {
   const loadScenes = useProjectStore((s) => s.loadScenes);
   const { busy, doing, error, run } = useAction();
   const [dictatedChange, setDictatedChange] = useState('');
-  const [showRewrite, setShowRewrite] = useState(false);
   const [confirmRewrite, setConfirmRewrite] = useState(false);
   const [confirmWriteAll, setConfirmWriteAll] = useState(false);
 
@@ -954,7 +797,6 @@ function SimpleStep5Book({ project }: { project: Project }) {
   }, [activeId, chapters, setActive]);
 
   useEffect(() => {
-    setShowRewrite(false);
     setDictatedChange('');
   }, [activeId]);
 
@@ -994,20 +836,14 @@ function SimpleStep5Book({ project }: { project: Project }) {
     });
   };
 
-  const rewriteCurrentChapter = () => {
+  const rewriteCurrentChapter = (instructions?: string) => {
     if (!chapter) return;
     setConfirmRewrite(false);
     void run(async () => {
       await flushAllAutosaves();
-      if (dictatedChange.trim()) {
-        const baseSummary = chapter.brief_summary.replace(/\n\nConsigne de l'auteur :[\s\S]*$/, '').trimEnd();
-        await pb.collection('chapters').update(chapter.id, {
-          brief_summary: `${baseSummary}\n\nConsigne de l'auteur : ${dictatedChange.trim()}`,
-        });
-        setDictatedChange('');
-      }
-      setShowRewrite(false);
-      await api.rewriteChapter(chapter.id);
+      const note = instructions?.trim() || undefined;
+      if (note) setDictatedChange('');
+      await api.rewriteChapter(chapter.id, note);
     }, 'rewrite');
   };
 
@@ -1121,6 +957,12 @@ function SimpleStep5Book({ project }: { project: Project }) {
 
           <ErrorNote error={error} />
 
+          {chapter.chapter_number === 1 && chapter.status !== 'APPROVED' && (
+            <div className="rounded-lg border border-accent/25 bg-accent-soft/40 p-3.5 text-base text-ink">
+              Ce premier chapitre sert d'échantillon pour votre livre. Lisez ou écoutez-le et corrigez librement le texte : vos retouches apprennent votre style à l'application pour la suite.
+            </div>
+          )}
+
           {blockedByPrevious && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-accent-soft p-4">
               <p className="text-base font-medium text-accent">
@@ -1163,16 +1005,37 @@ function SimpleStep5Book({ project }: { project: Project }) {
 
           {chapter.status === 'REVIEW' && allReview && (
             <div className="space-y-4 border-t border-line pt-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <Button
-                  variant="secondary"
-                  size="lg"
+              {!blockedByPrevious && (
+                <AiFeedbackCard
+                  simple
+                  voice
+                  title="Demander des correctifs à l'IA sur ce chapitre"
+                  description="Dictez au micro ou écrivez ce que vous souhaitez changer : l'IA réécrira ce chapitre en tenant compte de vos demandes."
+                  placeholder="Exemple : « Ajoute le souvenir de la maison familiale », « Rends le dialogue plus chaleureux »…"
+                  actionLabel="Appliquer mes correctifs"
+                  loadingLabel="Réécriture en cours…"
+                  ariaLabel="Consignes pour corriger ce chapitre"
+                  value={dictatedChange}
+                  onChange={setDictatedChange}
                   disabled={busy || running}
-                  aria-expanded={showRewrite}
-                  onClick={() => setShowRewrite((v) => !v)}
-                >
-                  <RefreshCw size={18} /> Réécrire…
-                </Button>
+                  loading={doing === 'rewrite' || job?.kind === 'CHAPTER'}
+                  onSubmit={() => rewriteCurrentChapter(dictatedChange)}
+                />
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                {!blockedByPrevious ? (
+                  <Button
+                    variant="secondary"
+                    size="lg"
+                    disabled={busy || running}
+                    onClick={() => setConfirmRewrite(true)}
+                  >
+                    <RefreshCw size={18} /> Réécrire tout le chapitre
+                  </Button>
+                ) : (
+                  <span />
+                )}
 
                 <Button
                   variant="success"
@@ -1197,40 +1060,6 @@ function SimpleStep5Book({ project }: { project: Project }) {
                       : 'Valider ce dernier chapitre'}
                 </Button>
               </div>
-
-              {showRewrite && (
-                <div className="space-y-3 rounded-xl border border-line bg-paper p-4">
-                  <h3 className="font-serif text-lg font-bold">Ce chapitre ne vous convient pas tout à fait ?</h3>
-                  <p className="text-sm text-muted">
-                    Dictez au micro ou écrivez ce que vous souhaitez changer, puis cliquez sur « Réécrire ce chapitre ».
-                  </p>
-                  <VoiceDictationButton
-                    compact
-                    label="Dicter mes consignes"
-                    value={dictatedChange}
-                    onChange={setDictatedChange}
-                  />
-                  <Textarea
-                    aria-label="Consignes pour réécrire ce chapitre"
-                    value={dictatedChange}
-                    onChange={(e) => setDictatedChange(e.target.value)}
-                    placeholder="Exemple : « Ajoute le souvenir de la maison familiale »…"
-                  />
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <Button variant="ghost" onClick={() => setShowRewrite(false)}>
-                      Fermer
-                    </Button>
-                    <Button
-                      variant="primary"
-                      size="lg"
-                      disabled={busy || running}
-                      onClick={() => setConfirmRewrite(true)}
-                    >
-                      <RefreshCw size={18} /> Réécrire ce chapitre
-                    </Button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -1374,7 +1203,7 @@ function SimpleStep5Book({ project }: { project: Project }) {
           <Button variant="secondary" onClick={() => setConfirmRewrite(false)}>
             Annuler
           </Button>
-          <Button variant="primary" onClick={rewriteCurrentChapter}>
+          <Button variant="primary" onClick={() => rewriteCurrentChapter()}>
             Réécrire ce chapitre
           </Button>
         </div>
@@ -1391,8 +1220,7 @@ export function SimpleWorkspace({ project }: { project: Project }) {
       {activeStepView === 1 && <SimpleStep1 key={project.id} project={project} />}
       {activeStepView === 2 && <SimpleStep2 project={project} />}
       {activeStepView === 3 && <SimpleStep3 project={project} />}
-      {activeStepView === 4 && <SimpleStep4 project={project} />}
-      {(activeStepView === 5 || activeStepView === 6) && <SimpleStep5Book project={project} />}
+      {(activeStepView === 4 || activeStepView === 5) && <SimpleStep5Book project={project} />}
     </div>
   );
 }

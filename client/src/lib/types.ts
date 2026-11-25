@@ -1,8 +1,8 @@
 export type ProjectStatus =
-  | 'STEP_1_INPUT' | 'STEP_2_CONCEPT_REVIEW' | 'STEP_3_OUTLINE_REVIEW' | 'STEP_4_SAMPLE_REVIEW' | 'STEP_5_WRITING' | 'COMPLETED';
+  | 'STEP_1_INPUT' | 'STEP_2_CONCEPT_REVIEW' | 'STEP_3_OUTLINE_REVIEW' | 'STEP_5_WRITING' | 'COMPLETED';
 
 export const STATUS_ORDER: ProjectStatus[] = [
-  'STEP_1_INPUT', 'STEP_2_CONCEPT_REVIEW', 'STEP_3_OUTLINE_REVIEW', 'STEP_4_SAMPLE_REVIEW', 'STEP_5_WRITING', 'COMPLETED',
+  'STEP_1_INPUT', 'STEP_2_CONCEPT_REVIEW', 'STEP_3_OUTLINE_REVIEW', 'STEP_5_WRITING', 'COMPLETED',
 ];
 
 export type LengthPreset = 'NOUVELLE' | 'NOVELLA' | 'ROMAN' | 'ROMAN_LONG' | 'CUSTOM';
@@ -34,7 +34,7 @@ export interface Project {
   reference_file: string;
   reference_meta: { filename: string; word_count: number; language: string; analyzed_at: string; story_memory?: ReferenceMemory } | null;
   raw_ideas: string; model_creative: string; style_matrix: StyleMatrix | null; story_bible: StoryBible | null;
-  reformulated_concept: string; sample_text: string; sample_ai_original: string; sample_draft: string;
+  reformulated_concept: string;
   updated: string;
 }
 
@@ -54,7 +54,7 @@ export interface Scene {
   status: 'PENDING' | 'GENERATING' | 'REVIEW' | 'APPROVED'; scene_break_before: boolean; truncated: boolean;
 }
 
-export type StageKey = 'read' | 'style' | 'concept' | 'outline' | 'sample' | 'plan' | 'write' | 'memory';
+export type StageKey = 'read' | 'style' | 'concept' | 'outline' | 'plan' | 'write' | 'memory';
 
 export interface JobStage {
   key: StageKey; done: number; total: number; avg_ms: number; basis: 'run' | 'history' | 'default';
@@ -66,7 +66,7 @@ export interface JobProgress {
 }
 
 export interface Job {
-  id: string; project: string; kind: 'ANALYZE' | 'OUTLINE' | 'SAMPLE' | 'CHAPTER' | 'SCENE' | 'BOOK'; target_id: string;
+  id: string; project: string; kind: 'ANALYZE' | 'OUTLINE' | 'CHAPTER' | 'SCENE' | 'BOOK'; target_id: string;
   status: 'RUNNING' | 'DONE' | 'CANCELLED' | 'FAILED'; progress: JobProgress | null;
   error_message: string; created: string;
 }

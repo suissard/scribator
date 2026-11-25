@@ -17,7 +17,7 @@ export function Privacy() {
       <article className="mx-auto max-w-2xl space-y-4 p-4 text-sm leading-6 sm:p-6">
         <h1 className="font-serif text-2xl font-semibold">Confidentialité</h1>
         <h2 className="pt-2 font-semibold">Données collectées</h2>
-        <p>Votre adresse e-mail, votre nom, les textes de vos livres, le fichier de référence le temps de son analyse, et le journal de vos appels à l'IA (coût, nombre de tokens).</p>
+        <p>Votre adresse e-mail, votre nom, les textes de vos livres, le fichier de référence le temps de son analyse, et le journal de vos appels à l'IA (coût, nombre de tokens). Si vous renseignez votre propre clé API OpenRouter, elle est chiffrée en AES-256-GCM avant stockage et n'est jamais conservée en clair ni renvoyée au navigateur.</p>
         <h2 className="pt-2 font-semibold">Transmission au fournisseur d'IA</h2>
         <p>Pour produire le texte, vos idées, votre concept, votre Bible, vos chapitres et des extraits de votre fichier de référence sont envoyés à OpenRouter, qui les transmet au fournisseur du modèle d'IA utilisé. Les fournisseurs susceptibles de stocker ces données sont exclus. Les extraits ne servent qu'à l'analyse de style et ne sont jamais réinjectés dans les prompts d'écriture.</p>
         <h2 className="pt-2 font-semibold">Conservation</h2>

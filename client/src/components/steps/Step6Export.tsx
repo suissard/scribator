@@ -42,7 +42,7 @@ export function Step6Export({ project }: { project: Project }) {
               <AlertTriangle size={16} className="shrink-0" />
               Aucun chapitre n'est encore validé. Validez au moins un chapitre dans le Studio avant d'exporter.
             </span>
-            <Button variant="secondary" size="sm" onClick={() => setStep(5)}>
+            <Button variant="secondary" size="sm" onClick={() => setStep(4)}>
               <ArrowLeft size={14} /> Retour au Studio
             </Button>
           </div>

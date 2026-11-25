@@ -20,4 +20,4 @@ Propose exactement {{scene_count}} scènes, pour environ {{remaining_words}} mot
 
 - `beat` : ce qui se passe et ce qui change à la fin de la scène, en 2 à 4 phrases.
 - `target_words` : la longueur de la scène.
-- `scene_break_before` : `true` s'il y a une rupture de temps ou de lieu avec la scène précédente.
+- `scene_break_before` : `true` s'il y a une rupture de temps ou de lieu avec la scène précédente.{{feedback}}

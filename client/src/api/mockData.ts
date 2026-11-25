@@ -67,9 +67,6 @@ export const MOCK_PROJECTS: Project[] = [
       ],
     },
     reformulated_concept: 'À Brumeval, cité cloîtrée sous un voile de vapeurs spectrales, Albane tente d\'élucider l\'apparition de silhouettes aqueuses répétant les derniers mots des disparus.',
-    sample_text: 'La nuit tombait sur les pavés humides de Brumeval, étouffant les bruits de pas d\'Albane sous une épaisse couche de silence. Près du canal, l\'onde sombre frissonna sans un souffle de vent.',
-    sample_ai_original: 'La nuit tombait sur les pavés humides de Brumeval, étouffant les bruits de pas d\'Albane...',
-    sample_draft: '',
     updated: new Date().toISOString(),
   },
   {
@@ -90,9 +87,6 @@ export const MOCK_PROJECTS: Project[] = [
     style_matrix: null,
     story_bible: null,
     reformulated_concept: '',
-    sample_text: '',
-    sample_ai_original: '',
-    sample_draft: '',
     updated: new Date(Date.now() - 3600000 * 24).toISOString(),
   },
 ];

@@ -110,13 +110,15 @@ export interface ProjectContext {
   synopsis_covers_up_to: number;
 }
 
+const NO_SAMPLE_REFERENCE = "(Aucun texte validé pour l'instant : ce premier chapitre deviendra cette référence.)";
+
 function systemBlock(template: string, p: ProjectContext, sample: string): string {
   return renderTemplate(template, {
     language: p.language,
     genre: p.genre,
     audience: p.audience,
     style_matrix: formatStyleMatrix(p.style_matrix),
-    sample_text: sample,
+    sample_text: sample.trim() || NO_SAMPLE_REFERENCE,
   });
 }
 
@@ -142,6 +144,7 @@ export interface SceneContextInput {
   chapter: Pick<ChapterRecord, 'chapter_number' | 'title' | 'brief_summary' | 'key_events'>;
   writtenScenes: string[];
   scene: { beat: string; target_words: number };
+  previousContent?: string;
   instructions?: string;
 }
 
@@ -165,6 +168,14 @@ export function buildSceneContext(input: SceneContextInput): BuiltContext {
   const written = input.writtenScenes.length
     ? `# Scènes déjà écrites de ce chapitre\n\n${input.writtenScenes.join('\n\n')}\n\n`
     : '';
+  const instructionsBlock = input.instructions?.trim()
+    ? [
+        ...(input.previousContent?.trim()
+          ? [`\n\n## Version précédente de la scène à corriger\n\n${input.previousContent.trim()}`]
+          : []),
+        `\n\n## Instructions de l'auteur pour cette version\n\n${input.instructions.trim()}`,
+      ].join('')
+    : '';
   const user =
     written +
     renderTemplate(input.templates.objective, {
@@ -174,30 +185,7 @@ export function buildSceneContext(input: SceneContextInput): BuiltContext {
       key_events: bullets(chapter.key_events ?? []),
       beat: scene.beat,
       target_words: scene.target_words,
-      instructions: input.instructions?.trim()
-        ? `\n\n## Instructions de l'auteur pour cette version\n\n${input.instructions.trim()}`
-        : '',
+      instructions: instructionsBlock,
     });
   return { system, user, memoryMode };
-}
-
-export interface SampleContextInput {
-  templates: { system: string; objective: string };
-  project: ProjectContext;
-  outline: OutlineChapter[];
-  chapter: Pick<ChapterRecord, 'title' | 'brief_summary' | 'key_events'>;
-}
-
-/** L'échantillon n'a ni mémoire ni texte de référence : c'est lui qui deviendra cette référence. */
-export function buildSampleContext(input: SampleContextInput): { system: TextBlock[]; user: string } {
-  const { project: p, chapter } = input;
-  const noReference = '(Aucun texte validé pour l\'instant : le passage demandé deviendra cette référence.)';
-  return {
-    system: [cached(systemBlock(input.templates.system, p, noReference)), cached(globalBlock(p, input.outline))],
-    user: renderTemplate(input.templates.objective, {
-      chapter_title: chapter.title,
-      chapter_summary: chapter.brief_summary,
-      key_events: bullets(chapter.key_events ?? []),
-    }),
-  };
 }
